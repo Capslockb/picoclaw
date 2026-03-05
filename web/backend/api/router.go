@@ -3,15 +3,31 @@ package api
 import "net/http"
 
 // Handler serves HTTP API requests.
-type Handler struct{}
+type Handler struct {
+	configPath string
+}
 
 // NewHandler creates an instance of the API handler.
-func NewHandler() *Handler {
-	return &Handler{}
+func NewHandler(configPath string) *Handler {
+	return &Handler{
+		configPath: configPath,
+	}
 }
 
 // RegisterRoutes binds all API endpoint handlers to the ServeMux.
-// All routes are registered under the /api/ prefix.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/status", h.handleStatus)
+	// Config CRUD
+	h.registerConfigRoutes(mux)
+
+	// Pico Channel (WebSocket chat)
+	h.registerPicoRoutes(mux)
+
+	// Gateway process lifecycle
+	h.registerGatewayRoutes(mux)
+
+	// Session history
+	h.registerSessionRoutes(mux)
+
+	// Model list management
+	h.registerModelRoutes(mux)
 }

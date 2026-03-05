@@ -1,0 +1,88 @@
+{
+  "navigation": {
+    "chat": "对话",
+    "model_group": "模型",
+    "providers": "服务商",
+    "models": "模型",
+    "credentials": "凭据",
+    "services": "服务",
+    "config": "配置",
+    "logs": "日志"
+  },
+  "chat": {
+    "welcome": "今天我能为您做些什么？",
+    "welcomeDesc": "您可以询问我天气、设置或其他任何任务，我随时为您效劳。",
+    "model": "模型",
+    "user": "用户",
+    "placeholder": "输入新消息...",
+    "attach": "附加文件",
+    "voice": "语音输入",
+    "newChat": "新建对话",
+    "connecting": "连接中...",
+    "connectFirst": "请先启动服务以开始对话",
+    "notConnected": "服务未运行，请先启动以进行对话。",
+    "thinking": {
+      "step1": "思考中...",
+      "step2": "分析您的请求...",
+      "step3": "准备回复...",
+      "step4": "马上就好..."
+    },
+    "time": {
+      "justNow": "刚刚",
+      "minsAgo": "{{count}}分钟前",
+      "hoursAgo": "{{count}}小时前",
+      "daysAgo": "{{count}}天前"
+    },
+    "history": "历史记录",
+    "noHistory": "暂无对话历史",
+    "messagesCount": "{{count}} 条消息",
+    "noModel": "选择模型",
+    "configureModelPrompt": "配置模型后使用",
+    "setupModel": {
+      "title": "尚未配置模型",
+      "description": "请先配置至少一个带有 API Key 的 AI 模型，才能开始对话。",
+      "action": "配置模型"
+    },
+    "modelGroup": {
+      "apikey": "API Key",
+      "oauth": "OAuth",
+      "local": "本地模型"
+    }
+  },
+  "header": {
+    "gateway": {
+      "stopDialog": {
+        "title": "停止服务？",
+        "description": "您确定要停止服务吗？这将断开您当前活动的聊天会话并停止推理。",
+        "confirm": "停止服务"
+      },
+      "action": {
+        "start": "启动服务",
+        "stop": "停止服务"
+      },
+      "status": {
+        "starting": "服务启动中..."
+      }
+    }
+  },
+  "common": {
+    "cancel": "取消"
+  },
+  "pages": {
+    "providers": {
+      "description": "管理各个 AI 模型服务商的接入配置。"
+    },
+    "models": {
+      "description": "在此管理您下载或借用的 AI 模型。"
+    },
+    "credentials": {
+      "description": "安全管理您的 API 密钥与访问凭据。"
+    },
+    "config": {
+      "description": "系统配置和偏好设置。"
+    },
+    "logs": {
+      "description": "系统日志和监控。"
+    }
+  }
+}

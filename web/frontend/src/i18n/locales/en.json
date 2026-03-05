@@ -1,0 +1,88 @@
+{
+  "navigation": {
+    "chat": "Chat",
+    "model_group": "Models",
+    "providers": "Providers",
+    "models": "Models",
+    "credentials": "Credentials",
+    "services": "Services",
+    "config": "Config",
+    "logs": "Logs"
+  },
+  "chat": {
+    "welcome": "How can I help you today?",
+    "welcomeDesc": "Ask me about weather, settings, or any other tasks. I'm here to assist you.",
+    "model": "Model",
+    "user": "User",
+    "placeholder": "Start a new message...",
+    "attach": "Attach file",
+    "voice": "Voice input",
+    "newChat": "New Chat",
+    "connecting": "Connecting...",
+    "connectFirst": "Connect to gateway to start chatting",
+    "notConnected": "Gateway is not running. Start it to chat.",
+    "thinking": {
+      "step1": "Thinking...",
+      "step2": "Analyzing your request...",
+      "step3": "Preparing response...",
+      "step4": "Almost there..."
+    },
+    "time": {
+      "justNow": "just now",
+      "minsAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
+    "history": "History",
+    "noHistory": "No chat history yet",
+    "messagesCount": "{{count}} messages",
+    "noModel": "Select model",
+    "configureModelPrompt": "Configure models to use",
+    "setupModel": {
+      "title": "No Model Configured",
+      "description": "You need to configure at least one AI model with an API key before you can start chatting.",
+      "action": "Configure Models"
+    },
+    "modelGroup": {
+      "apikey": "API Key",
+      "oauth": "OAuth",
+      "local": "Local"
+    }
+  },
+  "header": {
+    "gateway": {
+      "stopDialog": {
+        "title": "Stop Gateway Service?",
+        "description": "Are you sure you want to stop the gateway? This will disconnect your active chat sessions and halt inference.",
+        "confirm": "Stop Gateway"
+      },
+      "action": {
+        "start": "Start Gateway",
+        "stop": "Stop Gateway"
+      },
+      "status": {
+        "starting": "Starting Gateway..."
+      }
+    }
+  },
+  "common": {
+    "cancel": "Cancel"
+  },
+  "pages": {
+    "providers": {
+      "description": "Manage AI model providers and configurations."
+    },
+    "models": {
+      "description": "Manage AI models here."
+    },
+    "credentials": {
+      "description": "Securely manage your API keys and credentials."
+    },
+    "config": {
+      "description": "System configuration and preferences."
+    },
+    "logs": {
+      "description": "System logs and monitoring."
+    }
+  }
+}
