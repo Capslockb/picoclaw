@@ -11,7 +11,7 @@ interface PicoMessage {
   type: string
   id?: string
   session_id?: string
-  timestamp?: number
+  timestamp?: number | string
   payload?: Record<string, unknown>
 }
 
@@ -28,9 +28,37 @@ function generateSessionId(): string {
   return crypto.randomUUID()
 }
 
+const UNIX_MS_THRESHOLD = 1e12
+
+function normalizeUnixTimestamp(timestamp: number): number {
+  return timestamp < UNIX_MS_THRESHOLD ? timestamp * 1000 : timestamp
+}
+
+function parseTimestamp(dateRaw: number | string | Date) {
+  if (typeof dateRaw === "number") {
+    return dayjs(normalizeUnixTimestamp(dateRaw))
+  }
+
+  if (typeof dateRaw === "string") {
+    const trimmed = dateRaw.trim()
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      const numeric = Number(trimmed)
+      if (Number.isFinite(numeric)) {
+        return dayjs(normalizeUnixTimestamp(numeric))
+      }
+    }
+    return dayjs(trimmed)
+  }
+
+  return dayjs(dateRaw)
+}
+
 // Helper to format message timestamps
 export function formatMessageTime(dateRaw: number | string | Date): string {
-  const date = dayjs(dateRaw)
+  const date = parseTimestamp(dateRaw)
+  if (!date.isValid()) {
+    return ""
+  }
   const now = dayjs()
 
   const isToday = date.isSame(now, "day")
@@ -75,7 +103,10 @@ export function usePicoChat() {
         const content = (payload.content as string) || ""
         const messageId = (payload.message_id as string) || `pico-${Date.now()}`
         // Use provided timestamp or current time
-        const timestampRaw = msg.timestamp ? msg.timestamp * 1000 : Date.now()
+        const timestampRaw =
+          msg.timestamp !== undefined && Number.isFinite(Number(msg.timestamp))
+            ? normalizeUnixTimestamp(Number(msg.timestamp))
+            : Date.now()
 
         setMessages((prev) => [
           ...prev,

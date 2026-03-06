@@ -16,6 +16,8 @@ export function AssistantMessage({
   timestamp = "",
 }: AssistantMessageProps) {
   const [isCopied, setIsCopied] = useState(false)
+  const formattedTimestamp =
+    timestamp !== "" ? formatMessageTime(timestamp) : ""
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -29,10 +31,10 @@ export function AssistantMessage({
       <div className="text-muted-foreground flex items-center justify-between gap-2 px-1 text-xs opacity-70">
         <div className="flex items-center gap-2">
           <span>PicoClaw</span>
-          {timestamp && (
+          {formattedTimestamp && (
             <>
               <span className="opacity-50">•</span>
-              <span>{formatMessageTime(timestamp)}</span>
+              <span>{formattedTimestamp}</span>
             </>
           )}
         </div>
