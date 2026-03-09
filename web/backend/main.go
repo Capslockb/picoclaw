@@ -107,6 +107,12 @@ func main() {
 		}()
 	}
 
+	// Auto-start gateway after backend starts listening.
+	go func() {
+		time.Sleep(1 * time.Second)
+		apiHandler.TryAutoStartGateway()
+	}()
+
 	// Start the Server
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("Server failed to start: %v", err)

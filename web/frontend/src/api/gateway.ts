@@ -2,6 +2,8 @@
 
 interface GatewayStatusResponse {
   gateway_status: "running" | "starting" | "stopped" | "error"
+  gateway_start_allowed?: boolean
+  gateway_start_reason?: string
   pid?: number
   logs?: string[]
   log_total?: number

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -40,29 +41,70 @@ func (h *Handler) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/gateway/restart", h.handleGatewayRestart)
 }
 
-// handleGatewayStart starts the picoclaw gateway subprocess.
-//
-//	POST /api/gateway/start
-func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
+// TryAutoStartGateway checks whether gateway start preconditions are met and
+// starts it when possible. Intended to be called by the backend at startup.
+func (h *Handler) TryAutoStartGateway() {
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
 
-	// Prevent duplicate starts
+	if isGatewayProcessAliveLocked() {
+		return
+	}
 	if gateway.cmd != nil && gateway.cmd.Process != nil {
-		// Check if process is still alive (signal 0 doesn't kill, just checks)
-		if err := gateway.cmd.Process.Signal(syscall.Signal(0)); err == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]any{
-				"status": "already_running",
-				"pid":    gateway.cmd.Process.Pid,
-			})
-			return
-		}
-		// Process is dead, clean up
 		gateway.cmd = nil
 	}
 
+	ready, reason, err := h.gatewayStartReady()
+	if err != nil {
+		log.Printf("Skip auto-starting gateway: %v", err)
+		return
+	}
+	if !ready {
+		log.Printf("Skip auto-starting gateway: %s", reason)
+		return
+	}
+
+	pid, err := h.startGatewayLocked()
+	if err != nil {
+		log.Printf("Failed to auto-start gateway: %v", err)
+		return
+	}
+	log.Printf("Gateway auto-started (PID: %d)", pid)
+}
+
+// gatewayStartReady validates whether current config can start the gateway.
+func (h *Handler) gatewayStartReady() (bool, string, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to load config: %w", err)
+	}
+
+	modelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
+	if modelName == "" {
+		return false, "no default model configured", nil
+	}
+
+	modelCfg, err := cfg.GetModelConfig(modelName)
+	if err != nil {
+		return false, fmt.Sprintf("default model %q is invalid", modelName), nil
+	}
+
+	hasCredential := strings.TrimSpace(modelCfg.APIKey) != "" ||
+		strings.TrimSpace(modelCfg.AuthMethod) != ""
+	if !hasCredential {
+		return false, fmt.Sprintf("default model %q has no credentials configured", modelName), nil
+	}
+
+	return true, "", nil
+}
+
+func isGatewayProcessAliveLocked() bool {
+	return gateway.cmd != nil &&
+		gateway.cmd.Process != nil &&
+		gateway.cmd.Process.Signal(syscall.Signal(0)) == nil
+}
+
+func (h *Handler) startGatewayLocked() (int, error) {
 	// Locate the picoclaw executable
 	execPath := findPicoclawBinary()
 
@@ -70,14 +112,12 @@ func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create stdout pipe: %v", err), http.StatusInternalServerError)
-		return
+		return 0, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create stderr pipe: %v", err), http.StatusInternalServerError)
-		return
+		return 0, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	// Clear old logs for this new run
@@ -90,8 +130,7 @@ func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to start gateway: %v", err), http.StatusInternalServerError)
-		return
+		return 0, fmt.Errorf("failed to start gateway: %w", err)
 	}
 
 	gateway.cmd = cmd
@@ -158,10 +197,59 @@ func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	return pid, nil
+}
+
+// handleGatewayStart starts the picoclaw gateway subprocess.
+//
+//	POST /api/gateway/start
+func (h *Handler) handleGatewayStart(w http.ResponseWriter, r *http.Request) {
+	gateway.mu.Lock()
+	defer gateway.mu.Unlock()
+
+	// Prevent duplicate starts
+	if isGatewayProcessAliveLocked() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "already_running",
+			"pid":    gateway.cmd.Process.Pid,
+		})
+		return
+	}
+	if gateway.cmd != nil && gateway.cmd.Process != nil {
+		gateway.cmd = nil
+	}
+
+	ready, reason, err := h.gatewayStartReady()
+	if err != nil {
+		http.Error(
+			w,
+			fmt.Sprintf("Failed to validate gateway start conditions: %v", err),
+			http.StatusInternalServerError,
+		)
+		return
+	}
+	if !ready {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "precondition_failed",
+			"message": reason,
+		})
+		return
+	}
+
+	pid, err := h.startGatewayLocked()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to start gateway: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
-		"pid":    cmd.Process.Pid,
+		"pid":    pid,
 	})
 }
 
@@ -292,6 +380,17 @@ func (h *Handler) handleGatewayStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	ready, reason, readyErr := h.gatewayStartReady()
+	if readyErr != nil {
+		data["gateway_start_allowed"] = false
+		data["gateway_start_reason"] = readyErr.Error()
+	} else {
+		data["gateway_start_allowed"] = ready
+		if !ready {
+			data["gateway_start_reason"] = reason
+		}
+	}
+
 	// Append incremental log data
 	appendGatewayLogs(r, data)
 
@@ -385,16 +484,29 @@ func (h *Handler) currentGatewayStatus() string {
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
 
-	event := GatewayEvent{Status: "stopped"}
+	data := map[string]any{
+		"gateway_status": "stopped",
+	}
 	if gateway.cmd != nil && gateway.cmd.Process != nil {
 		if err := gateway.cmd.Process.Signal(syscall.Signal(0)); err == nil {
-			event.Status = "running"
-			event.PID = gateway.cmd.Process.Pid
+			data["gateway_status"] = "running"
+			data["pid"] = gateway.cmd.Process.Pid
 		}
 	}
 
-	data, _ := json.Marshal(event)
-	return string(data)
+	ready, reason, readyErr := h.gatewayStartReady()
+	if readyErr != nil {
+		data["gateway_start_allowed"] = false
+		data["gateway_start_reason"] = readyErr.Error()
+	} else {
+		data["gateway_start_allowed"] = ready
+		if !ready {
+			data["gateway_start_reason"] = reason
+		}
+	}
+
+	encoded, _ := json.Marshal(data)
+	return string(encoded)
 }
 
 // findPicoclawBinary locates the picoclaw executable.

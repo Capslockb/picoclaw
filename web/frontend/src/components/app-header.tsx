@@ -40,7 +40,7 @@ export function AppHeader() {
   const {
     state: gwState,
     loading: gwLoading,
-    isInitialized,
+    canStart,
     start,
     stop,
   } = useGateway()
@@ -48,11 +48,13 @@ export function AppHeader() {
   const isRunning = gwState === "running"
   const isStarting = gwState === "starting"
   const isStopped = gwState === "stopped" || gwState === "unknown"
+  const showNotConnectedHint =
+    canStart && (gwState === "stopped" || gwState === "error")
 
   const [showStopDialog, setShowStopDialog] = React.useState(false)
 
   const handleGatewayToggle = () => {
-    if (gwLoading) return
+    if (gwLoading || (!isRunning && !canStart)) return
     if (isRunning) {
       setShowStopDialog(true)
     } else {
@@ -80,7 +82,7 @@ export function AppHeader() {
 
       {/* Center prominent connection status */}
       <div className="pointer-events-none absolute left-1/2 hidden h-full -translate-x-1/2 items-center justify-center lg:flex">
-        {isInitialized && !isRunning && !isStarting && (
+        {showNotConnectedHint && (
           <div className="text-muted-foreground flex items-center gap-2 rounded-full border border-dashed px-4 py-1.5 text-xs shadow-sm backdrop-blur-md">
             <span className="bg-destructive/50 relative flex size-2 shrink-0 items-center justify-center rounded-full">
               <span className="bg-destructive absolute inline-flex size-full animate-ping rounded-full opacity-75"></span>
@@ -133,7 +135,7 @@ export function AppHeader() {
                 : ""
           }`}
           onClick={handleGatewayToggle}
-          disabled={gwLoading || isStarting}
+          disabled={gwLoading || isStarting || (!isRunning && !canStart)}
         >
           {gwLoading || isStarting ? (
             <IconLoader2 className="h-4 w-4 animate-spin opacity-70" />

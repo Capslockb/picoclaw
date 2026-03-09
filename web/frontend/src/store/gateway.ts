@@ -8,12 +8,12 @@ export type GatewayState =
   | "unknown"
 
 export interface GatewayStoreState {
-  isInitialized: boolean
   status: GatewayState
+  canStart: boolean
 }
 
 // Global atom for gateway state
 export const gatewayAtom = atom<GatewayStoreState>({
-  isInitialized: false,
   status: "unknown",
+  canStart: true,
 })

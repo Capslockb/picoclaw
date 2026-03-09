@@ -1,15 +1,31 @@
 import { useAtom } from "jotai"
 import { useCallback, useEffect, useState } from "react"
 
-import { getGatewayStatus, startGateway, stopGateway } from "@/api/gateway"
+import {
+  type GatewayStatusResponse,
+  getGatewayStatus,
+  startGateway,
+  stopGateway,
+} from "@/api/gateway"
 import { gatewayAtom } from "@/store"
 
 // Global variable to ensure we only have one SSE connection
 let sseInitialized = false
 
 export function useGateway() {
-  const [{ status: state, isInitialized }, setGateway] = useAtom(gatewayAtom)
+  const [{ status: state, canStart }, setGateway] = useAtom(gatewayAtom)
   const [loading, setLoading] = useState(false)
+
+  const applyGatewayStatus = useCallback(
+    (data: GatewayStatusResponse) => {
+      setGateway((prev) => ({
+        ...prev,
+        status: data.gateway_status ?? "unknown",
+        canStart: data.gateway_start_allowed ?? true,
+      }))
+    },
+    [setGateway],
+  )
 
   // Initialize global SSE connection once
   useEffect(() => {
@@ -17,18 +33,21 @@ export function useGateway() {
     sseInitialized = true
 
     getGatewayStatus()
-      .then((data) => {
-        setGateway({
-          status: data.gateway_status ?? "unknown",
-          isInitialized: true,
-        })
-      })
+      .then((data) => applyGatewayStatus(data))
       .catch(() => {
         setGateway({
           status: "unknown",
-          isInitialized: true,
+          canStart: true,
         })
       })
+
+    const statusPoll = window.setInterval(() => {
+      getGatewayStatus()
+        .then((data) => applyGatewayStatus(data))
+        .catch(() => {
+          // ignore polling errors
+        })
+    }, 5000)
 
     // Subscribe to SSE for real-time updates globally
     const es = new EventSource("/api/gateway/events")
@@ -36,8 +55,18 @@ export function useGateway() {
     es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.gateway_status) {
-          setGateway((prev) => ({ ...prev, status: data.gateway_status }))
+        if (
+          data.gateway_status ||
+          typeof data.gateway_start_allowed === "boolean"
+        ) {
+          setGateway((prev) => ({
+            ...prev,
+            status: data.gateway_status ?? prev.status,
+            canStart:
+              typeof data.gateway_start_allowed === "boolean"
+                ? data.gateway_start_allowed
+                : prev.canStart,
+          }))
         }
       } catch {
         // ignore
@@ -50,12 +79,15 @@ export function useGateway() {
     }
 
     return () => {
+      window.clearInterval(statusPoll)
       es.close()
       sseInitialized = false
     }
-  }, [setGateway])
+  }, [applyGatewayStatus, setGateway])
 
   const start = useCallback(async () => {
+    if (!canStart) return
+
     setLoading(true)
     try {
       await startGateway()
@@ -63,11 +95,16 @@ export function useGateway() {
       setGateway((prev) => ({ ...prev, status: "starting" }))
     } catch (err) {
       console.error("Failed to start gateway:", err)
-      setGateway((prev) => ({ ...prev, status: "unknown" }))
+      try {
+        const status = await getGatewayStatus()
+        applyGatewayStatus(status)
+      } catch {
+        setGateway((prev) => ({ ...prev, status: "unknown" }))
+      }
     } finally {
       setLoading(false)
     }
-  }, [setGateway])
+  }, [applyGatewayStatus, canStart, setGateway])
 
   const stop = useCallback(async () => {
     setLoading(true)
@@ -80,5 +117,5 @@ export function useGateway() {
     }
   }, [])
 
-  return { state, loading, isInitialized, start, stop }
+  return { state, loading, canStart, start, stop }
 }
