@@ -443,3 +443,4 @@ func TestShellTool_CustomAllowPatterns(t *testing.T) {
 		t.Errorf("'git push upstream main' should still be blocked by deny pattern")
 	}
 }
+

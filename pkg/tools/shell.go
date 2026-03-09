@@ -305,11 +305,14 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		}
 	}
 
-	if !explicitlyAllowed {
-		for _, pattern := range t.denyPatterns {
-			if pattern.MatchString(lower) {
-				return "Command blocked by safety guard (dangerous pattern detected)"
-			}
+	if explicitlyAllowed {
+		// Explicitly allowlisted commands bypass all guard checks.
+		return ""
+	}
+
+	for _, pattern := range t.denyPatterns {
+		if pattern.MatchString(lower) {
+			return "Command blocked by safety guard (dangerous pattern detected)"
 		}
 	}
 

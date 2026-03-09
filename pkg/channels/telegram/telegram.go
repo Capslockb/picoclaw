@@ -26,16 +26,17 @@ import (
 )
 
 var (
-	reHeading    = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
-	reBlockquote = regexp.MustCompile(`^>\s*(.*)$`)
-	reLink       = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	reBoldStar   = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reBoldUnder  = regexp.MustCompile(`__(.+?)__`)
-	reItalic     = regexp.MustCompile(`_([^_]+)_`)
-	reStrike     = regexp.MustCompile(`~~(.+?)~~`)
-	reListItem   = regexp.MustCompile(`^[-*]\s+`)
-	reCodeBlock  = regexp.MustCompile("```[\\w]*\\n?([\\s\\S]*?)```")
-	reInlineCode = regexp.MustCompile("`([^`]+)`")
+	reHeading        = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	reBlockquote     = regexp.MustCompile(`(?m)^>\s*(.*)$`)
+	reLink           = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	reBoldItalicStar = regexp.MustCompile(`\*\*\*(.+?)\*\*\*`)
+	reBoldStar       = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reBoldUnder      = regexp.MustCompile(`__(.+?)__`)
+	reItalic         = regexp.MustCompile(`_([^_]+)_`)
+	reStrike         = regexp.MustCompile(`~~(.+?)~~`)
+	reListItem       = regexp.MustCompile(`(?m)^[-*]\s+`)
+	reCodeBlock      = regexp.MustCompile("```[\\w]*\\n?([\\s\\S]*?)```")
+	reInlineCode     = regexp.MustCompile("`([^`]+)`")
 )
 
 type TelegramChannel struct {
@@ -232,6 +233,11 @@ func (c *TelegramChannel) sendHTMLChunk(ctx context.Context, chatID int64, htmlC
 // (Telegram's typing indicator expires after ~5s) in a background goroutine.
 // The returned stop function is idempotent and cancels the goroutine.
 func (c *TelegramChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
+	// Respect channel-level typing config; disabled means no-op.
+	if !c.config.Channels.Telegram.Typing.Enabled {
+		return func() {}, nil
+	}
+
 	cid, err := parseChatID(chatID)
 	if err != nil {
 		return func() {}, err
@@ -608,6 +614,8 @@ func markdownToTelegramHTML(text string) string {
 
 	text = reLink.ReplaceAllString(text, `<a href="$2">$1</a>`)
 
+	text = reBoldItalicStar.ReplaceAllString(text, "<b><i>$1</i></b>")
+
 	text = reBoldStar.ReplaceAllString(text, "<b>$1</b>")
 
 	text = reBoldUnder.ReplaceAllString(text, "<b>$1</b>")
@@ -619,6 +627,8 @@ func markdownToTelegramHTML(text string) string {
 		}
 		return "<i>" + match[1] + "</i>"
 	})
+
+	text = replaceSingleAsteriskItalics(text)
 
 	text = reStrike.ReplaceAllString(text, "<s>$1</s>")
 
@@ -692,6 +702,53 @@ func escapeHTML(text string) string {
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	return text
+}
+
+func replaceSingleAsteriskItalics(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+
+	for i := 0; i < len(text); {
+		if text[i] != '*' || (i+1 < len(text) && text[i+1] == '*') {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		closeIdx := -1
+		for j := i + 1; j < len(text); j++ {
+			if text[j] == '\n' {
+				break
+			}
+			if text[j] != '*' {
+				continue
+			}
+			if j+1 < len(text) && text[j+1] == '*' {
+				continue
+			}
+			closeIdx = j
+			break
+		}
+		if closeIdx == -1 {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		content := text[i+1 : closeIdx]
+		if strings.TrimSpace(content) == "" {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		b.WriteString("<i>")
+		b.WriteString(content)
+		b.WriteString("</i>")
+		i = closeIdx + 1
+	}
+
+	return b.String()
 }
 
 // isBotMentioned checks if the bot is mentioned in the message via entities.

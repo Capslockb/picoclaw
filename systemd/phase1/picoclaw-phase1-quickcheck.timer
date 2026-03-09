@@ -1,0 +1,11 @@
+[Unit]
+Description=PicoClaw Phase1 Quickcheck Timer (startup + hourly)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=picoclaw-phase1-quickcheck.service
+
+[Install]
+WantedBy=timers.target

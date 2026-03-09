@@ -36,18 +36,9 @@ func skillsListCmd(loader *skills.SkillsLoader) {
 }
 
 func skillsInstallCmd(installer *skills.SkillInstaller, repo string) error {
-	fmt.Printf("Installing skill from %s...\n", repo)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := installer.InstallFromGitHub(ctx, repo); err != nil {
-		return fmt.Errorf("failed to install skill: %w", err)
-	}
-
-	fmt.Printf("\u2713 Skill '%s' installed successfully!\n", filepath.Base(repo))
-
-	return nil
+	_ = installer
+	_ = repo
+	return fmt.Errorf("direct repository skill installs are disabled on this node; use `picoclaw skills install --registry clawhub <slug>`")
 }
 
 // skillsInstallFromRegistry installs a skill from a named registry (e.g. clawhub).
@@ -108,6 +99,16 @@ func skillsInstallFromRegistry(cfg *config.Config, registryName, slug string) er
 
 	if result.IsSuspicious {
 		fmt.Printf("\u26a0\ufe0f  Warning: skill '%s' is flagged as suspicious.\n", slug)
+	}
+
+	check, err := skills.VerifyInstalledSkill(targetDir, registry.Name(), slug, result.Version)
+	if err != nil {
+		_ = os.RemoveAll(targetDir)
+		return fmt.Errorf("✗ local verification failed: %w", err)
+	}
+	if !check.Passed {
+		_ = os.RemoveAll(targetDir)
+		return fmt.Errorf("✗ local verification blocked install: %s", strings.Join(check.FailureReasons, "; "))
 	}
 
 	fmt.Printf("\u2713 Skill '%s' v%s installed successfully!\n", slug, result.Version)

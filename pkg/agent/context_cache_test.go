@@ -667,3 +667,27 @@ func BenchmarkBuildMessagesWithCache(b *testing.B) {
 		_ = cb.BuildMessages(history, "summary", "new message", nil, "cli", "test")
 	}
 }
+
+func TestSystemPromptContainsExecutionTruthfulnessRules(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"IDENTITY.md": "# Identity\nTest agent.",
+	})
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	prompt := cb.BuildSystemPromptWithCache()
+
+	checks := []string{
+		"No fabricated completion",
+		"Evidence-first reporting",
+		"No fictional tool narratives",
+		"Use an operator voice",
+		"not verified",
+		"Do NOT just say you'll do it or pretend to do it.",
+	}
+	for _, needle := range checks {
+		if !strings.Contains(prompt, needle) {
+			t.Fatalf("system prompt missing %q", needle)
+		}
+	}
+}

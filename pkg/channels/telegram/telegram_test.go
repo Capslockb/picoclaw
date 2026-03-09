@@ -234,6 +234,16 @@ func TestSend_MarkdownShortButHTMLLong_MultipleCalls(t *testing.T) {
 	)
 }
 
+func TestMarkdownToTelegramHTML_SingleAsteriskItalic(t *testing.T) {
+	html := markdownToTelegramHTML("alpha *beta* gamma")
+	assert.Equal(t, "alpha <i>beta</i> gamma", html)
+}
+
+func TestMarkdownToTelegramHTML_ListBulletStaysBullet(t *testing.T) {
+	html := markdownToTelegramHTML("* item\n*next*")
+	assert.Equal(t, "• item\n<i>next</i>", html)
+}
+
 func TestSend_NotRunning(t *testing.T) {
 	caller := &stubCaller{
 		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {

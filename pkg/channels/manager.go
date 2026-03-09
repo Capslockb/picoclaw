@@ -10,8 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"math"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -64,6 +66,158 @@ var channelRateConfig = map[string]float64{
 	"matrix":   2,
 	"line":     10,
 	"irc":      2,
+}
+
+var rootDashboardTemplate = template.Must(template.New("root_dashboard").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PicoClaw Dashboard</title>
+  <style>
+    :root {
+      --bg: radial-gradient(1200px 600px at 10% -10%, #243b55 0%, #0f2027 35%, #0b0f14 100%);
+      --card: rgba(255,255,255,0.06);
+      --card-border: rgba(255,255,255,0.12);
+      --text: #eaf2ff;
+      --muted: #9fb4d1;
+      --ok: #1fd29b;
+      --warn: #ffd166;
+      --accent: #65b7ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 18px 36px; }
+    .hero {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
+      margin-bottom: 18px;
+    }
+    .title { font-size: 30px; font-weight: 700; letter-spacing: 0.4px; margin: 0; }
+    .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px;
+      backdrop-filter: blur(8px);
+    }
+    .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+    .v { font-size: 18px; margin-top: 6px; font-weight: 650; }
+    .list { margin: 0; padding-left: 18px; line-height: 1.6; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .chip {
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.04);
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1 class="title">PicoClaw Dashboard</h1>
+        <p class="sub">Live runtime overview for channels and health endpoints</p>
+      </div>
+      <div class="chip">Generated {{.GeneratedAt}}</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="k">Service</div>
+        <div class="v">picoclaw <span class="ok">online</span></div>
+      </div>
+      <div class="card">
+        <div class="k">Gateway</div>
+        <div class="v">{{.Address}}</div>
+      </div>
+      <div class="card">
+        <div class="k">Channels Enabled</div>
+        <div class="v">{{len .Channels}}</div>
+      </div>
+      <div class="card">
+        <div class="k">Health</div>
+        <div class="v"><a href="/health">/health</a> · <a href="/ready">/ready</a></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="k">Channel List</div>
+      {{if .Channels}}
+      <div class="row">
+        {{range .Channels}}<span class="chip">{{.}}</span>{{end}}
+      </div>
+      {{else}}
+      <p class="warn">No channels currently registered.</p>
+      {{end}}
+    </div>
+
+    <div class="card">
+      <div class="k">Webhook Routes</div>
+      {{if .Webhooks}}
+      <ul class="list">
+        {{range .Webhooks}}
+        <li><strong>{{.Name}}</strong>: <a href="{{.Path}}">{{.Path}}</a></li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="warn">No webhook routes registered.</p>
+      {{end}}
+    </div>
+
+    <p class="footer">Tip: this page auto-refreshes health status every 15s using /health and /ready.</p>
+  </div>
+  <script>
+    async function ping(path) {
+      try {
+        const r = await fetch(path, { cache: "no-store" });
+        return r.ok;
+      } catch (_) { return false; }
+    }
+    async function run() {
+      const h = await ping("/health");
+      const r = await ping("/ready");
+      const title = document.querySelector(".title");
+      if (title) {
+        title.textContent = h && r ? "PicoClaw Dashboard" : "PicoClaw Dashboard (degraded)";
+      }
+      setTimeout(run, 15000);
+    }
+    run();
+  </script>
+</body>
+</html>`))
+
+type dashboardWebhook struct {
+	Name string
+	Path string
+}
+
+type dashboardViewData struct {
+	Address     string
+	GeneratedAt string
+	Channels    []string
+	Webhooks    []dashboardWebhook
 }
 
 type channelWorker struct {
@@ -292,6 +446,46 @@ func (m *Manager) initChannels() error {
 // that implement WebhookHandler and/or HealthChecker to register their handlers.
 func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 	m.mux = http.NewServeMux()
+
+	// Register the control-plane dashboard and API (root endpoint).
+	m.registerControlPlaneRoutes(addr)
+
+	// Keep the original lightweight dashboard available as fallback.
+	m.mux.HandleFunc("/legacy-dashboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/legacy-dashboard" {
+			http.NotFound(w, r)
+			return
+		}
+
+		data := dashboardViewData{
+			Address:     addr,
+			GeneratedAt: time.Now().Format(time.RFC3339),
+			Channels:    make([]string, 0, len(m.channels)),
+			Webhooks:    make([]dashboardWebhook, 0, len(m.channels)),
+		}
+
+		m.mu.RLock()
+		for name, ch := range m.channels {
+			data.Channels = append(data.Channels, name)
+			if wh, ok := ch.(WebhookHandler); ok {
+				data.Webhooks = append(data.Webhooks, dashboardWebhook{
+					Name: name,
+					Path: wh.WebhookPath(),
+				})
+			}
+		}
+		m.mu.RUnlock()
+
+		sort.Strings(data.Channels)
+		sort.Slice(data.Webhooks, func(i, j int) bool { return data.Webhooks[i].Name < data.Webhooks[j].Name })
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := rootDashboardTemplate.Execute(w, data); err != nil {
+			logger.ErrorCF("channels", "legacy dashboard render failed", map[string]any{"error": err.Error()})
+			http.Error(w, "legacy dashboard render failed", http.StatusInternalServerError)
+			return
+		}
+	})
 
 	// Register health endpoints
 	if healthServer != nil {

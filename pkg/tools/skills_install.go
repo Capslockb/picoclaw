@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,12 +160,22 @@ func (t *InstallSkillTool) Execute(ctx context.Context, args map[string]any) *To
 		_ = err
 	}
 
+	check, err := skills.VerifyInstalledSkill(targetDir, registry.Name(), slug, result.Version)
+	if err != nil {
+		_ = os.RemoveAll(targetDir)
+		return ErrorResult(fmt.Sprintf("skill %q failed local verification: %v", slug, err))
+	}
+	if !check.Passed {
+		_ = os.RemoveAll(targetDir)
+		return ErrorResult(fmt.Sprintf("skill %q blocked by local verification: %s", slug, strings.Join(check.FailureReasons, "; ")))
+	}
+
 	// Build result with moderation warning if suspicious.
 	var output string
 	if result.IsSuspicious {
 		output = fmt.Sprintf("⚠️ Warning: skill %q is flagged as suspicious (may contain risky patterns).\n\n", slug)
 	}
-	output += fmt.Sprintf("Successfully installed skill %q v%s from %s registry.\nLocation: %s\n",
+	output += fmt.Sprintf("Successfully installed skill %q v%s from trusted %s registry.\nLocation: %s\nChecked: .skill-check.json written with hashes and policy results.\n",
 		slug, result.Version, registry.Name(), targetDir)
 
 	if result.Summary != "" {

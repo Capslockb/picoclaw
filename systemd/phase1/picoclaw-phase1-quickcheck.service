@@ -1,0 +1,13 @@
+[Unit]
+Description=PicoClaw Phase1 Quickcheck
+Wants=network-online.target
+After=network-online.target picoclaw.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/picoclaw/phase1.env
+ExecStart=/usr/bin/python3 /root/picoclaw/scripts/phase1/health_quickcheck.py
+
+[Install]
+WantedBy=multi-user.target

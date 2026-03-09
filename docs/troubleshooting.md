@@ -12,9 +12,9 @@
 - **Wrong:** `"model": "free"` → OpenRouter receives `free` and rejects it.
 - **Right:** `"model": "openrouter/free"` → OpenRouter receives `openrouter/free` (auto free-tier routing).
 
-**Fix:** In `~/.picoclaw/config.json` (or your config path):
+**Fix:** In `~/.picoclaw/config.json` (or the file pointed to by `PICOCLAW_CONFIG`):
 
-1. **agents.defaults.model** must match a `model_name` in `model_list` (e.g. `"openrouter-free"`).
+1. **agents.defaults.model_name** should match a `model_name` in `model_list` (e.g. `"openrouter-free"`).
 2. That entry’s **model** must be a valid OpenRouter model ID, for example:
    - `"openrouter/free"` – auto free-tier
    - `"google/gemini-2.0-flash-exp:free"`
@@ -26,7 +26,7 @@ Example snippet:
 {
   "agents": {
     "defaults": {
-      "model": "openrouter-free"
+      "model_name": "openrouter-free"
     }
   },
   "model_list": [
@@ -39,5 +39,9 @@ Example snippet:
   ]
 }
 ```
+
+If the same config works interactively but fails under `systemd`, verify that the service sets either `PICOCLAW_CONFIG=/path/to/config.json` or `PICOCLAW_HOME=/path/to/home`.
+
+`picoclaw agent` is an interactive CLI. It is not a long-running daemon and should not be used as a `systemd` service without additional wrapper logic.
 
 Get your key at [OpenRouter Keys](https://openrouter.ai/keys).

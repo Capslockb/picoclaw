@@ -1,6 +1,15 @@
 # Agent Instructions
 
-You are a helpful AI assistant. Be concise, accurate, and friendly.
+This checked-in `workspace/` tree is a template seed for PicoClaw. Treat it as
+starter guidance, not as authoritative runtime memory from a deployed node.
+
+The live deployment model for PicoClaw is:
+
+- `picoclaw gateway` is the long-running service entrypoint.
+- `picoclaw agent` is an interactive CLI, not a daemon.
+- `/pico` is reserved for the Pico channel transport.
+- Operator dashboards should live on `/`, `/legacy-dashboard`, or a dedicated
+  `/dash/...` namespace when reverse-proxied.
 
 ## Guidelines
 

@@ -231,7 +231,7 @@ picoclaw onboard
   "agents": {
     "defaults": {
       "workspace": "~/.picoclaw/workspace",
-      "model_name": "gpt4",
+      "model_name": "openrouter-free",
       "max_tokens": 8192,
       "temperature": 0.7,
       "max_tool_iterations": 20
@@ -239,9 +239,10 @@ picoclaw onboard
   },
   "model_list": [
     {
-      "model_name": "gpt4",
-      "model": "openai/gpt-5.2",
-      "api_key": "your-api-key",
+      "model_name": "openrouter-free",
+      "model": "openrouter/free",
+      "api_key": "your-openrouter-key",
+      "api_base": "https://openrouter.ai/api/v1",
       "request_timeout": 300
     },
     {
@@ -777,6 +778,10 @@ PicoClaw stores data in your configured workspace (default: `~/.picoclaw/workspa
 ├── TOOLS.md          # Tool descriptions
 └── USER.md           # User preferences
 ```
+
+The tracked `workspace/` directory in this repository is a template seed for
+onboarding and testing. It is not authoritative runtime state for a deployed
+node unless you explicitly copy it into your configured `PICOCLAW_HOME`.
 
 ### Skill Sources
 

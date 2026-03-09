@@ -12,13 +12,21 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-// Ensure GroqTranscriber satisfies the Transcriber interface at compile time.
+// Ensure transcribers satisfy the Transcriber interface at compile time.
 var _ Transcriber = (*GroqTranscriber)(nil)
+var _ Transcriber = (*ElevenLabsTranscriber)(nil)
 
 func TestGroqTranscriberName(t *testing.T) {
 	tr := NewGroqTranscriber("sk-test")
 	if got := tr.Name(); got != "groq" {
 		t.Errorf("Name() = %q, want %q", got, "groq")
+	}
+}
+
+func TestElevenLabsTranscriberName(t *testing.T) {
+	tr := NewElevenLabsTranscriber("sk-test", "", "")
+	if got := tr.Name(); got != "elevenlabs" {
+		t.Errorf("Name() = %q, want %q", got, "elevenlabs")
 	}
 }
 
@@ -33,6 +41,27 @@ func TestDetectTranscriber(t *testing.T) {
 			name:    "no config",
 			cfg:     &config.Config{},
 			wantNil: true,
+		},
+		{
+			name: "elevenlabs via model list",
+			cfg: &config.Config{
+				ModelList: []config.ModelConfig{
+					{Model: "elevenlabs/scribe_v1", APIBase: "https://api.elevenlabs.io", APIKey: "sk-11"},
+				},
+			},
+			wantName: "elevenlabs",
+		},
+		{
+			name: "elevenlabs takes priority over groq provider",
+			cfg: &config.Config{
+				Providers: config.ProvidersConfig{
+					Groq: config.ProviderConfig{APIKey: "sk-groq-direct"},
+				},
+				ModelList: []config.ModelConfig{
+					{Model: "elevenlabs/scribe_v1", APIBase: "https://api.elevenlabs.io", APIKey: "sk-11"},
+				},
+			},
+			wantName: "elevenlabs",
 		},
 		{
 			name: "groq provider key",
@@ -63,7 +92,7 @@ func TestDetectTranscriber(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name: "provider key takes priority over model list",
+			name: "groq provider key takes priority over groq model list",
 			cfg: &config.Config{
 				Providers: config.ProvidersConfig{
 					Groq: config.ProviderConfig{APIKey: "sk-groq-direct"},
@@ -103,7 +132,7 @@ func TestTranscribe(t *testing.T) {
 		t.Fatalf("failed to write fake audio file: %v", err)
 	}
 
-	t.Run("success", func(t *testing.T) {
+	t.Run("groq success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/audio/transcriptions" {
 				t.Errorf("unexpected path: %s", r.URL.Path)
@@ -135,7 +164,33 @@ func TestTranscribe(t *testing.T) {
 		}
 	})
 
-	t.Run("api error", func(t *testing.T) {
+	t.Run("elevenlabs success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/speech-to-text" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.Header.Get("xi-api-key") != "xi-test" {
+				t.Errorf("unexpected xi-api-key header: %s", r.Header.Get("xi-api-key"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"text":"hello from eleven","language_code":"en"}`))
+		}))
+		defer srv.Close()
+
+		tr := NewElevenLabsTranscriber("xi-test", srv.URL, "scribe_v1")
+		resp, err := tr.Transcribe(context.Background(), audioPath)
+		if err != nil {
+			t.Fatalf("Transcribe() error: %v", err)
+		}
+		if resp.Text != "hello from eleven" {
+			t.Errorf("Text = %q, want %q", resp.Text, "hello from eleven")
+		}
+		if resp.Language != "en" {
+			t.Errorf("Language = %q, want %q", resp.Language, "en")
+		}
+	})
+
+	t.Run("groq api error", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid_api_key"}`, http.StatusUnauthorized)
 		}))

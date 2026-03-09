@@ -188,6 +188,8 @@ func gatewayCmd(debug bool) error {
 		return err
 	}
 
+	// Shared HTTP server mode never calls health.Server.Start(), so mark readiness explicitly.
+	healthServer.SetReady(true)
 	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
 
 	go agentLoop.Run(ctx)

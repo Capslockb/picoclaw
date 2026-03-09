@@ -8,6 +8,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1594,7 +1596,11 @@ func (al *AgentLoop) handleCommand(
 	msg bus.InboundMessage,
 	agent *AgentInstance,
 ) (string, bool) {
-	if !commands.HasCommandPrefix(msg.Content) {
+	commandText := msg.Content
+	if !commands.HasCommandPrefix(commandText) && shouldAutoRunShellInTelegram(msg, commandText) {
+		commandText = "/run " + strings.TrimSpace(commandText)
+	}
+	if !commands.HasCommandPrefix(commandText) {
 		return "", false
 	}
 
@@ -1610,7 +1616,7 @@ func (al *AgentLoop) handleCommand(
 		Channel:  msg.Channel,
 		ChatID:   msg.ChatID,
 		SenderID: msg.SenderID,
-		Text:     msg.Content,
+		Text:     commandText,
 		Reply: func(text string) error {
 			commandReply = text
 			return nil
@@ -1647,9 +1653,29 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance) *commands.Runtim
 				return fmt.Errorf("channel manager not initialized")
 			}
 			if _, exists := al.channelManager.GetChannel(value); !exists && value != "cli" {
-				return fmt.Errorf("channel '%s' not found or not enabled", value)
+				return fmt.Errorf("channel %s not found or not enabled", value)
 			}
 			return nil
+		},
+		ExecuteShell: func(ctx context.Context, command string) (string, error) {
+			if !strings.EqualFold(strings.TrimSpace(os.Getenv("PICOCLAW_DASHBOARD_ALLOW_SHELL")), "true") {
+				return "", fmt.Errorf("shell execution disabled; set PICOCLAW_DASHBOARD_ALLOW_SHELL=true")
+			}
+			if strings.TrimSpace(command) == "" {
+				return "", fmt.Errorf("command is required")
+			}
+			cmdCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(cmdCtx, "bash", "-lc", command)
+			if agent != nil && strings.TrimSpace(agent.Workspace) != "" {
+				cmd.Dir = agent.Workspace
+			}
+			out, err := cmd.CombinedOutput()
+			text := strings.TrimSpace(string(out))
+			if len(text) > 6000 {
+				text = text[:6000] + "\n... (truncated)"
+			}
+			return text, err
 		},
 	}
 	if agent != nil {
@@ -1663,6 +1689,24 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance) *commands.Runtim
 		}
 	}
 	return rt
+}
+
+func shouldAutoRunShellInTelegram(msg bus.InboundMessage, text string) bool {
+	if msg.Channel != "telegram" || msg.Peer.Kind != "direct" {
+		return false
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || commands.HasCommandPrefix(trimmed) {
+		return false
+	}
+	first := strings.ToLower(strings.Fields(trimmed)[0])
+	allowed := map[string]bool{
+		"gws": true, "gcloud": true, "tailscale": true, "systemctl": true,
+		"redis-cli": true, "curl": true, "ssh": true, "ls": true,
+		"cat": true, "test": true, "mkdir": true, "chmod": true,
+		"chown": true, "journalctl": true, "picoclaw": true, "hostname": true,
+	}
+	return allowed[first]
 }
 
 func mapCommandError(result commands.ExecuteResult) string {

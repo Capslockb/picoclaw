@@ -1,0 +1,19 @@
+[Unit]
+Description=PicoClaw Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+# Set one or both of these when you want a non-default config location.
+# Environment=PICOCLAW_HOME=/opt/picoclaw
+# Environment=PICOCLAW_CONFIG=/etc/picoclaw/config.json
+ExecStart=/usr/local/bin/picoclaw gateway
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

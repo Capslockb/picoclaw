@@ -1,0 +1,11 @@
+[Unit]
+Description=PicoClaw Phase1 Recovery Timer (every 15m)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=picoclaw-phase1-recovery.service
+
+[Install]
+WantedBy=timers.target
