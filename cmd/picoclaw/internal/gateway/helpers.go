@@ -132,6 +132,9 @@ func gatewayCmd(debug bool) error {
 		mediaStore.Stop()
 		return fmt.Errorf("error creating channel manager: %w", err)
 	}
+	channelManager.SetControlPlaneDiagnoser(func(ctx context.Context, prompt string) (string, error) {
+		return agentLoop.ProcessHeartbeat(ctx, prompt, "cli", "direct")
+	})
 
 	// Inject channel manager and media store into agent loop
 	agentLoop.SetChannelManager(channelManager)

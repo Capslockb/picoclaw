@@ -230,18 +230,19 @@ type channelWorker struct {
 }
 
 type Manager struct {
-	channels      map[string]Channel
-	workers       map[string]*channelWorker
-	bus           *bus.MessageBus
-	config        *config.Config
-	mediaStore    media.MediaStore
-	dispatchTask  *asyncTask
-	mux           *http.ServeMux
-	httpServer    *http.Server
-	mu            sync.RWMutex
-	placeholders  sync.Map // "channel:chatID" → placeholderID (string)
-	typingStops   sync.Map // "channel:chatID" → func()
-	reactionUndos sync.Map // "channel:chatID" → reactionEntry
+	channels              map[string]Channel
+	workers               map[string]*channelWorker
+	bus                   *bus.MessageBus
+	config                *config.Config
+	mediaStore            media.MediaStore
+	dispatchTask          *asyncTask
+	mux                   *http.ServeMux
+	httpServer            *http.Server
+	controlPlaneDiagnoser func(context.Context, string) (string, error)
+	mu                    sync.RWMutex
+	placeholders          sync.Map // "channel:chatID" → placeholderID (string)
+	typingStops           sync.Map // "channel:chatID" → func()
+	reactionUndos         sync.Map // "channel:chatID" → reactionEntry
 }
 
 type asyncTask struct {
@@ -317,6 +318,14 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 	}
 
 	return m, nil
+}
+
+// SetControlPlaneDiagnoser injects a callback used by the control-plane UI when
+// an operator requests an LLM-backed diagnosis from the backend.
+func (m *Manager) SetControlPlaneDiagnoser(fn func(context.Context, string) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.controlPlaneDiagnoser = fn
 }
 
 // initChannel is a helper that looks up a factory by name and creates the channel.

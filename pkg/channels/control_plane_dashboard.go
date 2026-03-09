@@ -272,6 +272,81 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
 
     .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px; font-size: 12px; }
     .kv .k { color: #9fb8da; }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+    .metric-sm { font-size: 12px; color: var(--muted); }
+    .progress {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #0a1220;
+      border: 1px solid #1f314a;
+      margin-top: 8px;
+    }
+    .progress > span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #25d6af, #4ab8ff);
+      box-shadow: 0 0 18px rgba(74, 184, 255, 0.3);
+    }
+    .finding {
+      border: 1px solid #294264;
+      border-radius: 10px;
+      background: #0e1828;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+    .finding h4 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .finding p {
+      margin: 4px 0;
+      font-size: 12px;
+      color: #d2e3fb;
+    }
+    .domain-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .domain-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0f1727;
+      padding: 10px;
+    }
+    .domain-card h4 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .domain-card p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .access-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+    }
+    .access-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0f1727;
+      padding: 10px;
+    }
+    .access-card a {
+      word-break: break-all;
+    }
 
     @media (max-width: 1180px) {
       .shell { grid-template-columns: 72px 1fr; }
@@ -385,8 +460,37 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       <section id="view-auth" class="view">
         <div class="view-head">
           <div>
-            <h2 class="view-title">Auth / Onboarding</h2>
-            <p class="view-sub">System and per-user setup checklist, missing env vars, credential sync, and webhook readiness.</p>
+            <h2 class="view-title">Security / Auth / Secure Web</h2>
+            <p class="view-sub">High-level security controls, backend-driven diagnostics, Google/Tailscale readiness, and operator-facing secure access options.</p>
+          </div>
+        </div>
+        <div class="grid cards" id="securityCards"></div>
+        <div class="grid two">
+          <div class="card">
+            <h3>Security Domains</h3>
+            <div id="securityDomains" class="domain-grid"></div>
+          </div>
+          <div class="card">
+            <h3>Interactive Diagnostics</h3>
+            <div class="toolbar">
+              <button class="btn primary" data-action="security_llm_diagnose" data-result-target="securityActionResult">LLM self-diagnose</button>
+              <button class="btn" data-action="security_check_all" data-result-target="securityActionResult">Refresh posture</button>
+              <button class="btn" data-action="security_probe_google_auth" data-result-target="securityActionResult">Google auth</button>
+              <button class="btn" data-action="security_probe_secure_web" data-result-target="securityActionResult">Secure web</button>
+              <button class="btn" data-action="security_probe_exec_surface" data-result-target="securityActionResult">Exec surface</button>
+            </div>
+            <div id="securityActionResult" class="mono" style="font-size:12px; color:#cde0ff; white-space:pre-wrap;"></div>
+            <div id="securityDiagnosis" style="margin-top:10px;"></div>
+          </div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <h3>Findings / Fix Queue</h3>
+            <div id="securityFindings"></div>
+          </div>
+          <div class="card">
+            <h3>Web / Auth Access Matrix</h3>
+            <div id="securityAccess" class="access-grid"></div>
           </div>
         </div>
         <div class="grid two">
@@ -718,6 +822,59 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       }).join('') || 'No provider auth records.';
     }
 
+    function renderSecurity(data) {
+      const security = data.security || {};
+      const summary = security.summary || {};
+      document.getElementById('securityCards').innerHTML = [
+        { k: 'Overall posture', v: pill(summary.overall || 'unknown') },
+        { k: 'Security score', v: esc(summary.score || 0) + '/100' },
+        { k: 'Critical findings', v: esc(summary.critical || 0) },
+        { k: 'Warnings', v: esc(summary.warn || 0) },
+        { k: 'Auth ready', v: esc(summary.auth_ready || 0) },
+        { k: 'Secure web', v: (summary.secure_web ? 'ready' : 'not ready') + (summary.llm_ready ? ' • llm' : '') }
+      ].map(function (c) {
+        return '<div class="card"><h3>' + esc(c.k) + '</h3><div class="metric">' + c.v + '</div></div>';
+      }).join('');
+
+      document.getElementById('securityDomains').innerHTML = (security.domains || []).map(function (d) {
+        const signals = (d.signals || []).map(function (s) { return '<span class="chip">' + esc(s) + '</span>'; }).join('');
+        return '<div class="domain-card">'
+          + '<h4><span>' + esc(d.name) + '</span>' + pill(d.status || 'unknown') + '</h4>'
+          + '<div class="metric-sm">score ' + esc(d.score || 0) + '/100</div>'
+          + '<div class="progress"><span style="width:' + esc(d.score || 0) + '%;"></span></div>'
+          + '<p style="margin-top:8px;">' + esc(d.detail || '-') + '</p>'
+          + '<div style="margin-top:8px;">' + signals + '</div>'
+          + '</div>';
+      }).join('') || 'No security domains yet.';
+
+      document.getElementById('securityFindings').innerHTML = (security.findings || []).map(function (f) {
+        return '<div class="finding"><h4>' + pill(f.severity || 'unknown') + ' ' + esc(f.title || f.area || 'finding') + '</h4>'
+          + '<p><strong>Area:</strong> ' + esc(f.area || '-') + '</p>'
+          + '<p>' + esc(f.detail || '-') + '</p>'
+          + '<p><strong>Fix:</strong> ' + esc(f.fix_hint || '-') + '</p></div>';
+      }).join('') || 'No active findings.';
+
+      document.getElementById('securityAccess').innerHTML = (security.access || []).map(function (a) {
+        const link = a.url ? '<a href="' + esc(a.url) + '" target="_blank" rel="noreferrer">' + esc(a.url) + '</a>' : '<span class="mono">n/a</span>';
+        return '<div class="access-card"><div class="kv">'
+          + '<div class="k">surface</div><div>' + esc(a.name || '-') + '</div>'
+          + '<div class="k">status</div><div>' + pill(a.status || 'unknown') + '</div>'
+          + '<div class="k">url</div><div>' + link + '</div>'
+          + '<div class="k">auth</div><div>' + esc(a.auth || '-') + '</div>'
+          + '<div class="k">exposure</div><div>' + esc(a.exposure || '-') + '</div>'
+          + '<div class="k">notes</div><div>' + esc(a.notes || '-') + '</div>'
+          + '</div></div>';
+      }).join('') || 'No access surfaces detected.';
+
+      const diagnosis = security.diagnosis || {};
+      document.getElementById('securityDiagnosis').innerHTML =
+        '<div class="stack"><h3 style="margin:0;">Latest Diagnosis</h3>'
+        + '<div class="kv"><div class="k">status</div><div>' + pill(diagnosis.status || 'idle') + '</div>'
+        + '<div class="k">source</div><div>' + esc(diagnosis.source || '-') + '</div>'
+        + '<div class="k">last run</div><div>' + esc(diagnosis.last_run_at || '-') + '</div>'
+        + '<div class="k">summary</div><div style="white-space:pre-wrap;">' + esc(diagnosis.summary || diagnosis.last_error || 'No diagnosis run yet.') + '</div></div></div>';
+    }
+
     function renderJobs(data) {
       const jobs = data.jobs || { items: [] };
       const cards = [
@@ -824,6 +981,7 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
         renderAgents(data);
         renderNodes(data);
         renderTailscale(data);
+        renderSecurity(data);
         renderAuth(data);
         renderJobs(data);
         renderChat(data);
@@ -848,18 +1006,24 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       }
     }
 
-    async function runAction(action, target, payload) {
+    async function runAction(action, target, payload, resultTarget) {
+      const outputID = resultTarget || 'actionResult';
+      const outputNode = document.getElementById(outputID);
       try {
         const data = await fetchJSON(API.action, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ action: action, target: target || '', payload: payload || {} })
         });
-        document.getElementById('actionResult').textContent = JSON.stringify(data, null, 2);
+        if (outputNode) {
+          outputNode.textContent = JSON.stringify(data, null, 2);
+        }
         await refreshStatus();
         await refreshChatHistory();
       } catch (err) {
-        document.getElementById('actionResult').textContent = 'Action failed: ' + err.message;
+        if (outputNode) {
+          outputNode.textContent = 'Action failed: ' + err.message;
+        }
       }
     }
 
@@ -971,20 +1135,26 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       document.querySelector('#view-overview').addEventListener('click', function (ev) {
         const btn = ev.target.closest('button[data-action]');
         if (!btn) return;
-        runAction(btn.dataset.action, '', {});
+        runAction(btn.dataset.action, '', {}, btn.dataset.resultTarget || 'actionResult');
+      });
+
+      document.querySelector('#view-auth').addEventListener('click', function (ev) {
+        const btn = ev.target.closest('button[data-action]');
+        if (!btn) return;
+        runAction(btn.dataset.action, '', {}, btn.dataset.resultTarget || 'securityActionResult');
       });
 
       document.getElementById('nodesTable').addEventListener('click', function (ev) {
         const btn = ev.target.closest('button[data-node-action]');
         if (!btn) return;
-        runAction('ping_workers', btn.dataset.node, {});
+        runAction('ping_workers', btn.dataset.node, {}, 'actionResult');
       });
 
       document.getElementById('jobsTable').addEventListener('click', function (ev) {
         const btn = ev.target.closest('button[data-job-action]');
         if (!btn) return;
         const action = btn.dataset.jobAction === 'retry' ? 'retry_job' : 'cancel_job';
-        runAction(action, '', { job_id: btn.dataset.jobId });
+        runAction(action, '', { job_id: btn.dataset.jobId }, 'actionResult');
       });
     }
 
@@ -1017,6 +1187,7 @@ type controlPlaneStatus struct {
 	Nodes        []controlNode          `json:"nodes"`
 	Tailscale    controlTailscale       `json:"tailscale"`
 	Auth         controlAuth            `json:"auth"`
+	Security     controlSecurity        `json:"security"`
 	Jobs         controlJobs            `json:"jobs"`
 	Media        controlMedia           `json:"media"`
 	AppGenerator controlAppGenerator    `json:"app_generator"`
@@ -1095,6 +1266,59 @@ type controlPath struct {
 type controlAuth struct {
 	Checklist []controlChecklistItem `json:"checklist"`
 	Providers []controlAuthProvider  `json:"providers"`
+}
+
+type controlSecurity struct {
+	Summary   controlSecuritySummary   `json:"summary"`
+	Domains   []controlSecurityDomain  `json:"domains"`
+	Findings  []controlSecurityFinding `json:"findings"`
+	Access    []controlSecurityAccess  `json:"access"`
+	Diagnosis controlSecurityDiagnosis `json:"diagnosis"`
+}
+
+type controlSecuritySummary struct {
+	Overall   string `json:"overall"`
+	Score     int    `json:"score"`
+	Critical  int    `json:"critical"`
+	Warn      int    `json:"warn"`
+	AuthReady int    `json:"auth_ready"`
+	SecureWeb bool   `json:"secure_web"`
+	LLMReady  bool   `json:"llm_ready"`
+}
+
+type controlSecurityDomain struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Status  string   `json:"status"`
+	Score   int      `json:"score"`
+	Detail  string   `json:"detail"`
+	Signals []string `json:"signals"`
+}
+
+type controlSecurityFinding struct {
+	Severity string `json:"severity"`
+	Area     string `json:"area"`
+	Title    string `json:"title"`
+	Detail   string `json:"detail"`
+	FixHint  string `json:"fix_hint"`
+}
+
+type controlSecurityAccess struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Status   string `json:"status"`
+	Auth     string `json:"auth"`
+	Exposure string `json:"exposure"`
+	Notes    string `json:"notes"`
+}
+
+type controlSecurityDiagnosis struct {
+	Status    string `json:"status"`
+	LastRunAt string `json:"last_run_at"`
+	Summary   string `json:"summary"`
+	Source    string `json:"source"`
+	LastError string `json:"last_error"`
+	LastJobID string `json:"last_job_id"`
 }
 
 type controlChecklistItem struct {
@@ -1219,6 +1443,7 @@ type controlPlaneState struct {
 	chatHistory []controlChatMessage
 	actionLog   []string
 	sshCache    map[string]sshProbe
+	diagnosis   controlSecurityDiagnosis
 }
 
 type controlJobRequest struct {
@@ -1386,6 +1611,7 @@ func (m *Manager) buildControlPlaneStatus(addr string) controlPlaneStatus {
 	jobs := m.snapshotJobs(st)
 	heartbeatSummary := m.heartbeatSummary()
 	services := m.buildServiceCards(channels, authState, heartbeatSummary, jobs, st)
+	security := m.buildSecurityState(addr, nodes, tailscale, authState, services, pending, st)
 	agents := m.buildAgents(jobs, heartbeatSummary)
 	mediaState := m.buildMediaState()
 	appState := m.buildAppGeneratorState()
@@ -1407,6 +1633,7 @@ func (m *Manager) buildControlPlaneStatus(addr string) controlPlaneStatus {
 		Nodes:        nodes,
 		Tailscale:    tailscale,
 		Auth:         authState,
+		Security:     security,
 		Jobs:         jobs,
 		Media:        mediaState,
 		AppGenerator: appState,
@@ -1797,6 +2024,220 @@ func (m *Manager) buildAuthState(nodes []controlNode) (controlAuth, []controlChe
 	return controlAuth{Checklist: checklist, Providers: providers}, pending
 }
 
+func (m *Manager) buildSecurityState(
+	addr string,
+	nodes []controlNode,
+	tailscale controlTailscale,
+	authState controlAuth,
+	services []controlService,
+	pending []controlChecklistItem,
+	st *controlPlaneState,
+) controlSecurity {
+	workspace := m.config.WorkspacePath()
+	selfNode := findNodeByID(nodes, "pico")
+	gwsPath := filepath.Join(homeDir(), ".config", "gws", "credentials.json")
+	gwsReady := fileExists(gwsPath)
+	serveConfig := fileExists(filepath.Join(workspace, "ts-serve-picoclaw.json"))
+	certFiles := detectTailscaleCertFiles(selfNode.Hostname, workspace)
+	shellEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("PICOCLAW_DASHBOARD_ALLOW_SHELL")), "true")
+	execEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("PICOCLAW_ALLOW_EXEC")), "true")
+	publicBase := controlPlanePublicBase(selfNode, serveConfig)
+	llmReady := m.hasControlPlaneDiagnoser()
+
+	findings := make([]controlSecurityFinding, 0, 8)
+	if !selfNode.Online {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "error",
+			Area:     "tailnet",
+			Title:    "Tailnet reachability missing",
+			Detail:   "This node does not appear online in tailscale status, so secure remote control and SSH assumptions are degraded.",
+			FixHint:  "Restore tailscaled connectivity before relying on web-auth or cross-node recovery flows.",
+		})
+	}
+	if !gwsReady {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "warn",
+			Area:     "google-auth",
+			Title:    "Google credentials not synced",
+			Detail:   "No gws credentials.json was found for the active runtime, so Drive and Calendar-backed flows are not web-ready.",
+			FixHint:  "Complete Google auth sync, then keep the secure origin stable behind tailscale serve/cert.",
+		})
+	}
+	if len(certFiles) == 0 {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "warn",
+			Area:     "secure-web",
+			Title:    "No tailscale cert assets detected",
+			Detail:   "The control plane can be served over HTTP now, but no local certificate files were detected for a tighter HTTPS/tailscale setup.",
+			FixHint:  "Issue or sync tailscale cert files and keep the reverse-proxy target stable for auth redirects.",
+		})
+	}
+	if !serveConfig {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "warn",
+			Area:     "secure-web",
+			Title:    "tailscale serve config not tracked in runtime workspace",
+			Detail:   "A tracked serve manifest is not present in the active workspace, so web-auth origin management is less explicit than it should be.",
+			FixHint:  "Keep tailscale serve/cert configuration versioned and aligned with the control-plane route map.",
+		})
+	}
+	if shellEnabled {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "warn",
+			Area:     "exec-surface",
+			Title:    "Dashboard shell execution is enabled",
+			Detail:   "PICOCLAW_DASHBOARD_ALLOW_SHELL=true allows backend shell execution from control-plane workflows and needs deliberate operator control.",
+			FixHint:  "Restrict usage to trusted operators, prefer scoped actions, and disable when not needed.",
+		})
+	}
+	for _, p := range authState.Providers {
+		if p.Status == "error" {
+			findings = append(findings, controlSecurityFinding{
+				Severity: "error",
+				Area:     "auth-store",
+				Title:    "Expired provider credential",
+				Detail:   fmt.Sprintf("%s auth record for %s is expired or invalid.", p.Provider, p.Account),
+				FixHint:  "Refresh that provider credential before using it for secure web or operator workflows.",
+			})
+		}
+	}
+	for _, warning := range tailscale.Warnings {
+		findings = append(findings, controlSecurityFinding{
+			Severity: "warn",
+			Area:     "tailscale",
+			Title:    "Tailnet warning",
+			Detail:   warning,
+			FixHint:  "Clear the tailscale blocker before assuming remote execution or auth callback paths are healthy.",
+		})
+		if len(findings) >= 10 {
+			break
+		}
+	}
+
+	criticalCount := countSecurityFindings(findings, "error")
+	warnCount := countSecurityFindings(findings, "warn")
+
+	domains := []controlSecurityDomain{
+		{
+			ID:      "secure-web",
+			Name:    "Secure web surface",
+			Status:  securityDomainStatus(len(certFiles) > 0 && serveConfig && publicBase != "", len(certFiles) > 0 || publicBase != ""),
+			Score:   securityDomainScore(len(certFiles) > 0 && serveConfig && publicBase != "", len(certFiles) > 0 || publicBase != ""),
+			Detail:  "Reverse-proxy route, tailscale serve manifest, and certificate assets for a stable browser-facing control plane.",
+			Signals: compactSignals([]string{ternaryText(publicBase != "", "public route", "no public route"), ternaryText(serveConfig, "serve config", "no serve config"), ternaryText(len(certFiles) > 0, "cert files", "no cert files")}),
+		},
+		{
+			ID:      "identity-auth",
+			Name:    "Identity / Google auth",
+			Status:  securityDomainStatus(gwsReady && countAuthProvidersByStatus(authState.Providers, "error") == 0, gwsReady || countAuthProvidersByStatus(authState.Providers, "ok") > 0),
+			Score:   securityDomainScore(gwsReady && countAuthProvidersByStatus(authState.Providers, "error") == 0, gwsReady || countAuthProvidersByStatus(authState.Providers, "ok") > 0),
+			Detail:  "Google Workspace sync, provider credential freshness, and backend auth-store readiness.",
+			Signals: compactSignals([]string{ternaryText(gwsReady, "gws synced", "gws missing"), fmt.Sprintf("%d auth ok", countAuthProvidersByStatus(authState.Providers, "ok")), fmt.Sprintf("%d auth error", countAuthProvidersByStatus(authState.Providers, "error"))}),
+		},
+		{
+			ID:      "tailnet",
+			Name:    "Tailnet / remote execution",
+			Status:  securityDomainStatus(selfNode.Online && len(tailscale.Warnings) == 0, selfNode.Online),
+			Score:   securityDomainScore(selfNode.Online && len(tailscale.Warnings) == 0, selfNode.Online),
+			Detail:  "Tailscale online state, SSH reachability, and worker/node routing health.",
+			Signals: compactSignals([]string{ternaryText(selfNode.Online, "tailnet online", "tailnet offline"), fmt.Sprintf("%d warnings", len(tailscale.Warnings)), ternaryText(anyRemoteWorkerReady(nodes), "worker ready", "no worker ready")}),
+		},
+		{
+			ID:      "exec",
+			Name:    "Execution surface",
+			Status:  securityDomainStatus(execEnabled && !shellEnabled, execEnabled || shellEnabled),
+			Score:   securityDomainScore(execEnabled && !shellEnabled, execEnabled || shellEnabled),
+			Detail:  "Backend execution powers available to the control plane and whether they are tightly scoped or broadly exposed.",
+			Signals: compactSignals([]string{ternaryText(execEnabled, "exec enabled", "exec disabled"), ternaryText(shellEnabled, "shell enabled", "shell disabled"), ternaryText(serviceStatusIs(services, "codex-executor", "ok"), "codex executor", "missing executor")}),
+		},
+		{
+			ID:      "diagnosis",
+			Name:    "Self-diagnose / observability",
+			Status:  securityDomainStatus(llmReady && len(pending) == 0, llmReady),
+			Score:   securityDomainScore(llmReady && len(pending) == 0, llmReady),
+			Detail:  "Backend-driven posture refresh, LLM diagnosis availability, and fix queue visibility.",
+			Signals: compactSignals([]string{ternaryText(llmReady, "llm ready", "llm unavailable"), fmt.Sprintf("%d pending", len(pending)), fmt.Sprintf("%d findings", len(findings))}),
+		},
+	}
+
+	access := []controlSecurityAccess{
+		{
+			Name:     "Control plane UI",
+			URL:      joinURL(publicBase, "/dash/control"),
+			Status:   ternaryStatus(publicBase != "", "ok", "warn"),
+			Auth:     ternaryText(gwsReady, "backend auth ready", "backend auth partial"),
+			Exposure: "operator web",
+			Notes:    "Primary browser surface for posture, auth state, and backend-controlled fixes.",
+		},
+		{
+			Name:     "Control plane API",
+			URL:      joinURL(publicBase, "/api/control-plane/status"),
+			Status:   ternaryStatus(publicBase != "", "ok", "warn"),
+			Auth:     "none on route itself",
+			Exposure: "JSON status",
+			Notes:    "Use behind tailscale or reverse-proxy policy; route is designed for dynamic UI refresh.",
+		},
+		{
+			Name:     "Legacy dashboard",
+			URL:      joinURL(publicBase, "/legacy-dashboard"),
+			Status:   ternaryStatus(publicBase != "", "ok", "warn"),
+			Auth:     "same web surface",
+			Exposure: "fallback UI",
+			Notes:    "Lightweight fallback if the richer control-plane frontend regresses.",
+		},
+		{
+			Name:     "Google Workspace backend",
+			URL:      "",
+			Status:   ternaryStatus(gwsReady, "ok", "warn"),
+			Auth:     ternaryText(gwsReady, "credentials.json present", "sync required"),
+			Exposure: "backend-managed",
+			Notes:    "For browser auth, keep the redirect origin stable behind tailscale serve/cert and then sync credentials to gws.",
+		},
+		{
+			Name:     "tailscale serve / cert path",
+			URL:      joinURL(controlPlaneHTTPSBase(selfNode, certFiles), "/dash/control"),
+			Status:   ternaryStatus(len(certFiles) > 0 || serveConfig, "ok", "warn"),
+			Auth:     ternaryText(len(certFiles) > 0, "cert assets present", "cert assets missing"),
+			Exposure: "secure web candidate",
+			Notes:    "Use this as the hardened web-auth target once serve/cert policy is finalized.",
+		},
+	}
+
+	score := 100 - criticalCount*22 - warnCount*8
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	st.mu.Lock()
+	diagnosis := st.diagnosis
+	st.mu.Unlock()
+	if diagnosis.Status == "" {
+		diagnosis.Status = "idle"
+	}
+	if diagnosis.Source == "" {
+		diagnosis.Source = "backend"
+	}
+
+	return controlSecurity{
+		Summary: controlSecuritySummary{
+			Overall:   securityOverallStatus(criticalCount, warnCount),
+			Score:     score,
+			Critical:  criticalCount,
+			Warn:      warnCount,
+			AuthReady: countAuthProvidersByStatus(authState.Providers, "ok") + ternaryInt(gwsReady, 1, 0),
+			SecureWeb: len(certFiles) > 0 || serveConfig,
+			LLMReady:  llmReady,
+		},
+		Domains:   domains,
+		Findings:  findings,
+		Access:    access,
+		Diagnosis: diagnosis,
+	}
+}
+
 func (m *Manager) snapshotJobs(st *controlPlaneState) controlJobs {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -2097,6 +2538,113 @@ func (m *Manager) executeControlPlaneJob(req controlJobRequest) (string, []strin
 	}
 }
 
+func (m *Manager) runControlPlaneSecurityDiagnosis() (controlSecurityDiagnosis, error) {
+	status := m.buildControlPlaneStatus(getControlPlaneState(m).address)
+	diagnoser := m.getControlPlaneDiagnoser()
+	if diagnoser == nil {
+		diag := controlSecurityDiagnosis{
+			Status:    "warn",
+			LastRunAt: time.Now().Format(time.RFC3339),
+			Source:    "backend",
+			LastError: "LLM diagnoser unavailable",
+			Summary:   "No LLM diagnosis callback is configured for the control plane.",
+		}
+		m.storeSecurityDiagnosis(diag)
+		return diag, errors.New("llm diagnoser unavailable")
+	}
+
+	snapshot := map[string]any{
+		"summary":        status.Security.Summary,
+		"domains":        status.Security.Domains,
+		"findings":       status.Security.Findings,
+		"access":         status.Security.Access,
+		"pending_setup":  status.PendingSetup,
+		"tailscale":      status.Tailscale.Warnings,
+		"service_status": summarizeServiceStatuses(status.Services),
+	}
+	payload, _ := json.MarshalIndent(snapshot, "", "  ")
+	prompt := "You are diagnosing the PicoClaw control plane security posture. " +
+		"Do not call tools. Use only the supplied snapshot. " +
+		"Return a concise operator diagnosis with: 1) overall posture, 2) top 3 risks, 3) highest-value next fixes, 4) whether Google web auth should sit behind tailscale serve plus cert.\n\n" +
+		string(payload)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	text, err := diagnoser(ctx, prompt)
+	diag := controlSecurityDiagnosis{
+		Status:    ternaryStatus(err == nil, "ok", "error"),
+		LastRunAt: time.Now().Format(time.RFC3339),
+		Source:    "llm",
+		Summary:   strings.TrimSpace(text),
+	}
+	if err != nil {
+		diag.LastError = err.Error()
+		if diag.Summary == "" {
+			diag.Summary = "LLM diagnosis failed."
+		}
+	}
+	m.storeSecurityDiagnosis(diag)
+	return diag, err
+}
+
+func (m *Manager) securityGoogleProbe() map[string]any {
+	gwsPath := filepath.Join(homeDir(), ".config", "gws", "credentials.json")
+	clientSecret := filepath.Join(homeDir(), ".config", "gws", "client_secret.json")
+	authState, _ := m.buildAuthState(nil)
+	return map[string]any{
+		"gws_credentials_path": gwsPath,
+		"gws_credentials":      fileExists(gwsPath),
+		"client_secret":        fileExists(clientSecret),
+		"auth_store_google":    authProviderState(authState, "google-antigravity"),
+		"web_auth_note":        "Keep browser auth on a stable tailscale serve/cert origin, then sync resulting credentials back into gws.",
+	}
+}
+
+func (m *Manager) securitySecureWebProbe() map[string]any {
+	ts, tsErr := loadTailStatus()
+	host, _ := os.Hostname()
+	certFiles := detectTailscaleCertFiles(host, m.config.WorkspacePath())
+	return map[string]any{
+		"tailscale_online":     tsErr == nil && ts.Self.Online,
+		"tailscale_hostname":   firstNonEmpty(host, ts.Self.HostName),
+		"tailscale_ip":         first(ts.Self.TailscaleIPs),
+		"tailscale_serve_file": fileExists(filepath.Join(m.config.WorkspacePath(), "ts-serve-picoclaw.json")),
+		"cert_files":           certFiles,
+		"https_candidate":      joinURL(controlPlaneHTTPSBase(controlNode{Hostname: host, TailscaleIP: first(ts.Self.TailscaleIPs)}, certFiles), "/dash/control"),
+		"error":                errText(tsErr),
+	}
+}
+
+func (m *Manager) securityExecProbe() map[string]any {
+	workspace := m.config.WorkspacePath()
+	return map[string]any{
+		"dashboard_allow_shell": strings.EqualFold(strings.TrimSpace(os.Getenv("PICOCLAW_DASHBOARD_ALLOW_SHELL")), "true"),
+		"allow_exec":            strings.EqualFold(strings.TrimSpace(os.Getenv("PICOCLAW_ALLOW_EXEC")), "true"),
+		"codex_executor":        fileExists(filepath.Join(workspace, "wsl-codex-exec")),
+		"workspace":             workspace,
+		"guidance":              "Prefer scoped backend actions first; keep broad shell execution for break-glass operations.",
+	}
+}
+
+func (m *Manager) hasControlPlaneDiagnoser() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.controlPlaneDiagnoser != nil
+}
+
+func (m *Manager) getControlPlaneDiagnoser() func(context.Context, string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.controlPlaneDiagnoser
+}
+
+func (m *Manager) storeSecurityDiagnosis(diag controlSecurityDiagnosis) {
+	st := getControlPlaneState(m)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.diagnosis = diag
+}
+
 func (m *Manager) handleControlPlaneAction(action, target string, payload map[string]any) (map[string]any, error) {
 	action = strings.TrimSpace(action)
 	if action == "" {
@@ -2112,6 +2660,27 @@ func (m *Manager) handleControlPlaneAction(action, target string, payload map[st
 
 	result := map[string]any{"action": action, "target": target, "at": time.Now().Format(time.RFC3339)}
 	switch action {
+	case "security_check_all":
+		status := m.buildControlPlaneStatus(getControlPlaneState(m).address)
+		result["security"] = status.Security
+		result["summary"] = status.Security.Summary
+		return result, nil
+	case "security_probe_google_auth":
+		result["probe"] = m.securityGoogleProbe()
+		return result, nil
+	case "security_probe_secure_web":
+		result["probe"] = m.securitySecureWebProbe()
+		return result, nil
+	case "security_probe_exec_surface":
+		result["probe"] = m.securityExecProbe()
+		return result, nil
+	case "security_llm_diagnose":
+		diagnosis, err := m.runControlPlaneSecurityDiagnosis()
+		result["diagnosis"] = diagnosis
+		if err != nil {
+			return result, err
+		}
+		return result, nil
 	case "test_health_endpoints":
 		status := m.buildControlPlaneStatus(getControlPlaneState(m).address)
 		gateway := strings.TrimSpace(status.Gateway)
@@ -2538,6 +3107,174 @@ func errText(err error) string {
 		return ""
 	}
 	return trimLogLine(err.Error())
+}
+
+func summarizeServiceStatuses(services []controlService) map[string]string {
+	out := make(map[string]string, len(services))
+	for _, svc := range services {
+		out[svc.ID] = svc.Status
+	}
+	return out
+}
+
+func findNodeByID(nodes []controlNode, id string) controlNode {
+	for _, n := range nodes {
+		if n.ID == id {
+			return n
+		}
+	}
+	return controlNode{ID: id}
+}
+
+func anyRemoteWorkerReady(nodes []controlNode) bool {
+	for _, n := range nodes {
+		if n.ID != "pico" && n.WorkerReady {
+			return true
+		}
+	}
+	return false
+}
+
+func countSecurityFindings(findings []controlSecurityFinding, severity string) int {
+	count := 0
+	for _, f := range findings {
+		if f.Severity == severity {
+			count++
+		}
+	}
+	return count
+}
+
+func securityOverallStatus(criticalCount, warnCount int) string {
+	if criticalCount > 0 {
+		return "error"
+	}
+	if warnCount > 0 {
+		return "warn"
+	}
+	return "ok"
+}
+
+func securityDomainStatus(ok bool, partial bool) string {
+	if ok {
+		return "ok"
+	}
+	if partial {
+		return "warn"
+	}
+	return "error"
+}
+
+func securityDomainScore(ok bool, partial bool) int {
+	if ok {
+		return 92
+	}
+	if partial {
+		return 64
+	}
+	return 28
+}
+
+func countAuthProvidersByStatus(providers []controlAuthProvider, status string) int {
+	count := 0
+	for _, p := range providers {
+		if p.Status == status {
+			count++
+		}
+	}
+	return count
+}
+
+func compactSignals(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func serviceStatusIs(services []controlService, id, want string) bool {
+	for _, svc := range services {
+		if svc.ID == id {
+			return svc.Status == want
+		}
+	}
+	return false
+}
+
+func ternaryText(cond bool, yes, no string) string {
+	if cond {
+		return yes
+	}
+	return no
+}
+
+func ternaryInt(cond bool, yes, no int) int {
+	if cond {
+		return yes
+	}
+	return no
+}
+
+func detectTailscaleCertFiles(hostname, workspace string) []string {
+	hostnames := compactSignals([]string{
+		hostname,
+		firstNonEmpty(hostname, strings.TrimSpace(os.Getenv("TS_CERT_HOSTNAME"))),
+	})
+	roots := []string{
+		homeDir(),
+		workspace,
+		filepath.Join(homeDir(), ".config", "tailscale"),
+		filepath.Join(homeDir(), ".tailscale"),
+	}
+	seen := map[string]bool{}
+	files := []string{}
+	for _, host := range hostnames {
+		for _, root := range roots {
+			for _, ext := range []string{".crt", ".key"} {
+				path := filepath.Join(root, host+ext)
+				if fileExists(path) && !seen[path] {
+					seen[path] = true
+					files = append(files, path)
+				}
+			}
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func controlPlanePublicBase(selfNode controlNode, serveConfig bool) string {
+	if selfNode.TailscaleIP != "" {
+		return "http://" + selfNode.TailscaleIP + ":3000"
+	}
+	if serveConfig && selfNode.Hostname != "" {
+		return "http://" + selfNode.Hostname + ":3000"
+	}
+	return ""
+}
+
+func controlPlaneHTTPSBase(selfNode controlNode, certFiles []string) string {
+	if len(certFiles) == 0 {
+		return ""
+	}
+	if selfNode.Hostname != "" {
+		return "https://" + selfNode.Hostname
+	}
+	return ""
+}
+
+func joinURL(base, path string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	path = "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
+	if base == "" {
+		return ""
+	}
+	return base + path
 }
 
 func authProviderState(state controlAuth, provider string) string {
