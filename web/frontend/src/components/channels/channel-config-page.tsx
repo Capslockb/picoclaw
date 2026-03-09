@@ -494,7 +494,7 @@ export function ChannelConfigPage({ channelName }: ChannelConfigPageProps) {
           <div className="w-full max-w-250 space-y-5 pt-2">
             <div className="flex items-center gap-2 text-sm">
               <p className="font-medium">
-                {t("channels.edit.title", {
+                {t("channels.edit", {
                   name: channelDisplayName,
                 })}
               </p>

@@ -136,7 +136,7 @@ export function ModelsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={t("navigation.models", "Models")}>
+      <PageHeader title={t("navigation.models")}>
         <div className="flex items-center gap-3">
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
             <IconPlus className="size-4" />

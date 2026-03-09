@@ -6,7 +6,6 @@
     "credentials": "Credentials",
     "services": "Services",
     "channels_group": "Channels",
-    "channels": "Channels",
     "show_more_channels": "More",
     "show_less_channels": "Less",
     "config": "Config",
@@ -15,25 +14,14 @@
   "chat": {
     "welcome": "How can I help you today?",
     "welcomeDesc": "Ask me about weather, settings, or any other tasks. I'm here to assist you.",
-    "model": "Model",
-    "user": "User",
     "placeholder": "Start a new message...",
-    "attach": "Attach file",
-    "voice": "Voice input",
     "newChat": "New Chat",
-    "connecting": "Connecting...",
     "notConnected": "Gateway is not running. Start it to chat.",
     "thinking": {
       "step1": "Thinking...",
       "step2": "Analyzing your request...",
       "step3": "Preparing response...",
       "step4": "Almost there..."
-    },
-    "time": {
-      "justNow": "just now",
-      "minsAgo": "{{count}}m ago",
-      "hoursAgo": "{{count}}h ago",
-      "daysAgo": "{{count}}d ago"
     },
     "history": "History",
     "noHistory": "No chat history yet",
@@ -79,6 +67,9 @@
     "reset": "Reset",
     "confirm": "Confirm"
   },
+  "labels": {
+    "loading": "Loading..."
+  },
   "credentials": {
     "description": "Manage OAuth and token-based credentials for supported providers.",
     "loading": "Loading credentials...",
@@ -102,6 +93,7 @@
     "actions": {
       "browser": "Browser OAuth",
       "deviceCode": "Device Code",
+      "stopLoading": "Stop Loading",
       "saveToken": "Save",
       "logout": "Logout"
     },
@@ -146,9 +138,6 @@
   "models": {
     "description": "Configure API keys for AI providers. Only configured models are available for chat.",
     "loadError": "Failed to load models",
-    "header": {
-      "configured": "configured"
-    },
     "noDefaultHintPrefix": "No default model set yet. Click",
     "noDefaultHintSuffix": "to set one.",
     "status": {
@@ -185,8 +174,7 @@
     "delete": {
       "title": "Delete Model?",
       "description": "\"{{name}}\" will be permanently removed from your model list. This cannot be undone.",
-      "confirm": "Delete",
-      "errorDefault": "Cannot delete the default model. Please set another model as default first."
+      "confirm": "Delete"
     },
     "advanced": {
       "toggle": "Advanced options"
@@ -221,19 +209,10 @@
     }
   },
   "channels": {
-    "description": "Configure messaging channels to connect your AI agent to chat platforms.",
     "loadError": "Failed to load channels",
-    "search": "Search channels...",
-    "noResults": "No channels match your search.",
-    "header": {
-      "enabled": "enabled"
-    },
+    "edit": "Configure {{name}}",
     "status": {
-      "configured": "Configured",
-      "unconfigured": "Not configured"
-    },
-    "action": {
-      "configure": "Configure"
+      "configured": "Configured"
     },
     "name": {
       "telegram": "Telegram",
@@ -265,7 +244,6 @@
       "encryptKey": "Encrypt Key",
       "baseUrl": "API Base URL",
       "proxy": "HTTP Proxy",
-      "proxyHint": "Optional. e.g. http://127.0.0.1:7890",
       "mentionOnly": "Mention Only",
       "typingEnabled": "Typing Indicator",
       "placeholderEnabled": "Placeholder Message",
@@ -273,32 +251,17 @@
       "groupTriggerMentionOnly": "Group Mention Only",
       "groupTriggerPrefixes": "Group Trigger Prefixes",
       "allowFrom": "Allow From",
-      "allowFromHint": "Comma-separated list of allowed user/group IDs. Leave empty to allow all.",
       "allowFromPlaceholder": "e.g. 123456, 789012",
       "allowOrigins": "Allow Origins",
-      "allowOriginsHint": "Comma-separated list of allowed origins. Leave empty to allow all.",
       "allowOriginsPlaceholder": "e.g. https://example.com, http://localhost:5173",
       "secretPlaceholder": "Enter secret",
-      "secretPlaceholderSet": "Leave blank to keep existing",
       "secretHintSet": "A value is already set. Leave blank to keep it unchanged."
-    },
-    "edit": {
-      "title": "Configure {{name}}",
-      "description": "Set up credentials and options for this channel.",
-      "saveError": "Failed to save channel configuration",
-      "saving": "Saving..."
     },
     "page": {
       "notFound": "Channel \"{{name}}\" is not supported.",
       "saveSuccess": "Channel configuration saved.",
       "saveError": "Failed to save channel configuration",
-      "flowTitle": "Setup Flow",
-      "flowDescription": "Complete the following steps to put this channel into service.",
-      "step1": "Set credentials",
-      "step2": "Enable channel",
-      "step3": "Save and restart gateway",
       "enabled": "enabled",
-      "disabled": "disabled",
       "docLink": "Documentation",
       "enableLabel": "Enable channel"
     },
@@ -316,7 +279,6 @@
         "mentionOnly": "Only respond when the bot is explicitly mentioned in group chats.",
         "typingEnabled": "Display typing status while the assistant is generating a response.",
         "placeholderEnabled": "Enable temporary placeholder messages before the final reply is sent.",
-        "placeholderText": "Placeholder text shown while waiting for the final response.",
         "groupTriggerMentionOnly": "In group chats, respond only when the bot is mentioned.",
         "groupTriggerPrefixes": "Custom group-chat trigger prefixes, separated by commas.",
         "allowFrom": "Allowed user or group IDs, separated by commas.",
@@ -362,23 +324,8 @@
     }
   },
   "pages": {
-    "providers": {
-      "description": "Manage AI model providers and configurations."
-    },
-    "models": {
-      "description": "Manage AI models here."
-    },
-    "credentials": {
-      "description": "Securely manage your API keys and credentials."
-    },
     "config": {
-      "description": "System configuration and preferences.",
-      "visual_title": "Core Configuration",
-      "visual_desc": "Edit key runtime options here. Use Raw Config for full JSON editing.",
       "load_error": "Failed to load configuration. Please refresh and try again.",
-      "section_agents": "Agent Defaults",
-      "section_runtime": "Runtime",
-      "section_devices": "Devices",
       "workspace": "Workspace Directory",
       "workspace_hint": "Base directory for agent file operations.",
       "restrict_workspace": "Restrict to Workspace",
@@ -422,10 +369,6 @@
       "allowed_cidrs_placeholder": "192.168.1.0/24\n10.0.0.0/8",
       "launcher_load_error": "Failed to load service parameters.",
       "launcher_restart_hint": "Service parameter changes apply after restarting PicoClaw Web.",
-      "autostart_enable_success": "Launch at login has been enabled.",
-      "autostart_disable_success": "Launch at login has been disabled.",
-      "autostart_update_error": "Failed to update launch-at-login setting.",
-      "advanced_title": "Need full configuration access?",
       "advanced_desc": "Open the raw JSON page to edit every field directly.",
       "open_raw": "Raw Config",
       "back_to_visual": "Visual Config",
@@ -441,7 +384,6 @@
       "format_success": "JSON formatted successfully.",
       "format_error": "Invalid JSON format.",
       "format": "Format",
-      "lose_unsaved_changes": "You have unsaved changes. Are you sure you want to reset and lose these changes?",
       "unsaved_changes": "You have unsaved changes."
     },
     "logs": {

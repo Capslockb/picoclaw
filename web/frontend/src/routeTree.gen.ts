@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as CredentialsRouteImport } from './routes/credentials'
@@ -19,11 +18,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigRawRouteImport } from './routes/config.raw'
 import { Route as ChannelsNameRouteImport } from './routes/channels/$name'
 
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ModelsRoute = ModelsRouteImport.update({
   id: '/models',
   path: '/models',
@@ -72,7 +66,6 @@ export interface FileRoutesByFullPath {
   '/credentials': typeof CredentialsRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
-  '/providers': typeof ProvidersRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
@@ -83,7 +76,6 @@ export interface FileRoutesByTo {
   '/credentials': typeof CredentialsRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
-  '/providers': typeof ProvidersRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
@@ -95,7 +87,6 @@ export interface FileRoutesById {
   '/credentials': typeof CredentialsRoute
   '/logs': typeof LogsRoute
   '/models': typeof ModelsRoute
-  '/providers': typeof ProvidersRoute
   '/channels/$name': typeof ChannelsNameRoute
   '/config/raw': typeof ConfigRawRoute
 }
@@ -108,7 +99,6 @@ export interface FileRouteTypes {
     | '/credentials'
     | '/logs'
     | '/models'
-    | '/providers'
     | '/channels/$name'
     | '/config/raw'
   fileRoutesByTo: FileRoutesByTo
@@ -119,7 +109,6 @@ export interface FileRouteTypes {
     | '/credentials'
     | '/logs'
     | '/models'
-    | '/providers'
     | '/channels/$name'
     | '/config/raw'
   id:
@@ -130,7 +119,6 @@ export interface FileRouteTypes {
     | '/credentials'
     | '/logs'
     | '/models'
-    | '/providers'
     | '/channels/$name'
     | '/config/raw'
   fileRoutesById: FileRoutesById
@@ -142,18 +130,10 @@ export interface RootRouteChildren {
   CredentialsRoute: typeof CredentialsRoute
   LogsRoute: typeof LogsRoute
   ModelsRoute: typeof ModelsRoute
-  ProvidersRoute: typeof ProvidersRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/models': {
       id: '/models'
       path: '/models'
@@ -243,7 +223,6 @@ const rootRouteChildren: RootRouteChildren = {
   CredentialsRoute: CredentialsRoute,
   LogsRoute: LogsRoute,
   ModelsRoute: ModelsRoute,
-  ProvidersRoute: ProvidersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

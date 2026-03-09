@@ -69,7 +69,7 @@ export function ChatPage() {
   return (
     <div className="bg-background/95 flex h-full flex-col">
       <PageHeader
-        title={t("navigation.chat", "Chat")}
+        title={t("navigation.chat")}
         titleExtra={
           hasConfiguredModels && (
             <ModelSelector

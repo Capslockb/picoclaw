@@ -87,15 +87,15 @@ function LogsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={t("navigation.logs", "Logs")} />
+      <PageHeader title={t("navigation.logs")} />
 
       <div className="flex flex-1 flex-col overflow-hidden p-4 sm:p-8">
         <div className="mb-4">
           <h1 className="text-2xl font-semibold tracking-tight">
-            {t("navigation.logs", "Logs")}
+            {t("navigation.logs")}
           </h1>
           <p className="text-muted-foreground mt-2 text-sm">
-            {t("pages.logs.description", "System logs and monitoring.")}
+            {t("pages.logs.description")}
           </p>
         </div>
 

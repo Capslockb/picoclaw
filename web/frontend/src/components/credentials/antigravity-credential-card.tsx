@@ -40,22 +40,19 @@ export function AntigravityCredentialCard({
           <span>Google Antigravity</span>
         </span>
       }
-      description={t(
-        "credentials.providers.antigravity.description",
-        "Uses browser OAuth for Google Cloud Code Assist.",
-      )}
+      description={t("credentials.providers.antigravity.description")}
       status={status?.status ?? "not_logged_in"}
       authMethod={status?.auth_method}
       details={
         <div className="space-y-1">
           {status?.email && (
             <p>
-              {t("credentials.labels.email", "Email")}: {status.email}
+              {t("credentials.labels.email")}: {status.email}
             </p>
           )}
           {status?.project_id && (
             <p>
-              {t("credentials.labels.project", "Project")}: {status.project_id}
+              {t("credentials.labels.project")}: {status.project_id}
             </p>
           )}
         </div>
@@ -73,7 +70,7 @@ export function AntigravityCredentialCard({
                 <IconLoader2 className="size-4 animate-spin" />
               )}
               <IconLockOpen className="size-4" />
-              {t("credentials.actions.browser", "Browser OAuth")}
+              {t("credentials.actions.browser")}
             </Button>
             {browserLoading && (
               <Button
@@ -100,7 +97,7 @@ export function AntigravityCredentialCard({
             {activeAction === "google-antigravity:logout" && (
               <IconLoader2 className="size-4 animate-spin" />
             )}
-            {t("credentials.actions.logout", "Logout")}
+            {t("credentials.actions.logout")}
           </Button>
         ) : null
       }

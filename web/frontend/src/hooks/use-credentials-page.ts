@@ -53,9 +53,7 @@ export function useCredentialsPage() {
       setError("")
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : t("credentials.errors.loadFailed", "Failed to load credentials"),
+        err instanceof Error ? err.message : t("credentials.errors.loadFailed"),
       )
     } finally {
       setLoading(false)
@@ -113,10 +111,7 @@ export function useCredentialsPage() {
         setError(
           err instanceof Error
             ? err.message
-            : t(
-                "credentials.errors.flowFailed",
-                "Failed to check authentication flow",
-              ),
+            : t("credentials.errors.flowFailed"),
         )
       }
     }
@@ -196,12 +191,7 @@ export function useCredentialsPage() {
           return
         }
         setActiveAction("")
-        setError(
-          t(
-            "credentials.errors.popupBlocked",
-            "Unable to open a new tab. Please allow popups and try again.",
-          ),
-        )
+        setError(t("credentials.errors.popupBlocked"))
         return
       }
 
@@ -212,12 +202,7 @@ export function useCredentialsPage() {
           return
         }
         if (!resp.auth_url || !resp.flow_id) {
-          throw new Error(
-            t(
-              "credentials.errors.invalidBrowserResponse",
-              "Invalid browser login response",
-            ),
-          )
+          throw new Error(t("credentials.errors.invalidBrowserResponse"))
         }
 
         authTab.location.href = resp.auth_url
@@ -242,7 +227,7 @@ export function useCredentialsPage() {
         setError(
           err instanceof Error
             ? err.message
-            : t("credentials.errors.loginFailed", "Login failed"),
+            : t("credentials.errors.loginFailed"),
         )
       }
     },
@@ -263,12 +248,7 @@ export function useCredentialsPage() {
         return
       }
       if (!resp.flow_id || !resp.user_code || !resp.verify_url) {
-        throw new Error(
-          t(
-            "credentials.errors.invalidDeviceResponse",
-            "Invalid device code response",
-          ),
-        )
+        throw new Error(t("credentials.errors.invalidDeviceResponse"))
       }
 
       const flow: OAuthFlowState = {
@@ -296,7 +276,7 @@ export function useCredentialsPage() {
       setError(
         err instanceof Error
           ? err.message
-          : t("credentials.errors.loginFailed", "Login failed"),
+          : t("credentials.errors.loginFailed"),
       )
     }
   }, [bumpActionToken, isActionTokenCurrent, t])
@@ -320,7 +300,7 @@ export function useCredentialsPage() {
         setError(
           err instanceof Error
             ? err.message
-            : t("credentials.errors.loginFailed", "Login failed"),
+            : t("credentials.errors.loginFailed"),
         )
       } finally {
         setActiveAction("")
@@ -342,7 +322,7 @@ export function useCredentialsPage() {
         setError(
           err instanceof Error
             ? err.message
-            : t("credentials.errors.logoutFailed", "Logout failed"),
+            : t("credentials.errors.logoutFailed"),
         )
       } finally {
         setActiveAction("")
@@ -415,17 +395,15 @@ export function useCredentialsPage() {
       return ""
     }
     if (activeFlow.status === "pending") {
-      return t("credentials.flow.pending", "Waiting for authorization...")
+      return t("credentials.flow.pending")
     }
     if (activeFlow.status === "success") {
-      return t("credentials.flow.success", "Authentication successful")
+      return t("credentials.flow.success")
     }
     if (activeFlow.status === "expired") {
-      return t("credentials.flow.expired", "Authentication session expired")
+      return t("credentials.flow.expired")
     }
-    return (
-      activeFlow.error || t("credentials.flow.error", "Authentication failed")
-    )
+    return activeFlow.error || t("credentials.flow.error")
   }, [activeFlow, t])
 
   return {

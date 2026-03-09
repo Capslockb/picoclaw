@@ -42,15 +42,12 @@ export function CredentialsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title={t("navigation.credentials", "Credentials")} />
+      <PageHeader title={t("navigation.credentials")} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 sm:px-6">
         <div className="pt-2">
           <p className="text-muted-foreground text-sm">
-            {t(
-              "credentials.description",
-              "Manage OAuth and token-based credentials for supported providers.",
-            )}
+            {t("credentials.description")}
           </p>
         </div>
 
@@ -62,9 +59,7 @@ export function CredentialsPage() {
 
         {activeFlow && (
           <div className="bg-muted mt-4 rounded-lg border px-4 py-3 text-sm">
-            <p className="font-medium">
-              {t("credentials.flow.current", "Current authentication status")}
-            </p>
+            <p className="font-medium">{t("credentials.flow.current")}</p>
             <p className="text-muted-foreground mt-1">{flowHint}</p>
           </div>
         )}
@@ -72,7 +67,7 @@ export function CredentialsPage() {
         {loading ? (
           <div className="text-muted-foreground flex items-center gap-2 py-10 text-sm">
             <IconLoader2 className="size-4 animate-spin" />
-            {t("credentials.loading", "Loading credentials...")}
+            {t("credentials.loading")}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 py-5 lg:auto-rows-fr lg:grid-cols-3">

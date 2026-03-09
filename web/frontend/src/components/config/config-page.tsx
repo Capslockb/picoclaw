@@ -106,29 +106,14 @@ export function ConfigPage() {
 
   const autoStartSupported = autoStartStatus?.supported !== false
   const autoStartHint = autoStartError
-    ? t(
-        "pages.config.autostart_load_error",
-        "Failed to load launch-at-login status.",
-      )
+    ? t("pages.config.autostart_load_error")
     : !autoStartSupported
-      ? t(
-          "pages.config.autostart_unsupported",
-          "Launch at login is not supported on this platform.",
-        )
-      : t(
-          "pages.config.autostart_hint",
-          "Start PicoClaw Web automatically when you log in.",
-        )
+      ? t("pages.config.autostart_unsupported")
+      : t("pages.config.autostart_hint")
 
   const launcherHint = launcherError
-    ? t(
-        "pages.config.launcher_load_error",
-        "Failed to load service parameters.",
-      )
-    : t(
-        "pages.config.launcher_restart_hint",
-        "Service parameter changes apply after restarting PicoClaw Web.",
-      )
+    ? t("pages.config.launcher_load_error")
+    : t("pages.config.launcher_restart_hint")
 
   const updateField = <K extends keyof CoreConfigForm>(
     key: K,
@@ -148,12 +133,7 @@ export function ConfigPage() {
     setForm(baseline)
     setLauncherForm(launcherBaseline)
     setAutoStartEnabled(autoStartBaseline)
-    toast.info(
-      t(
-        "pages.config.reset_success",
-        "Changes have been reset to the last saved state.",
-      ),
-    )
+    toast.info(t("pages.config.reset_success"))
   }
 
   const handleSave = async () => {
@@ -251,12 +231,7 @@ export function ConfigPage() {
 
       if (autoStartDirty) {
         if (!autoStartSupported) {
-          throw new Error(
-            t(
-              "pages.config.autostart_unsupported",
-              "Launch at login is not supported on this platform.",
-            ),
-          )
+          throw new Error(t("pages.config.autostart_unsupported"))
         }
         const status = await updateAutoStartEnabled(autoStartEnabled)
         setAutoStartEnabled(status.enabled)
@@ -264,14 +239,10 @@ export function ConfigPage() {
         queryClient.setQueryData(["system", "autostart"], status)
       }
 
-      toast.success(
-        t("pages.config.save_success", "Configuration saved successfully."),
-      )
+      toast.success(t("pages.config.save_success"))
     } catch (err) {
       toast.error(
-        err instanceof Error
-          ? err.message
-          : t("pages.config.save_error", "Failed to save configuration."),
+        err instanceof Error ? err.message : t("pages.config.save_error"),
       )
     } finally {
       setSaving(false)
@@ -281,12 +252,12 @@ export function ConfigPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title={t("navigation.config", "Config")}
+        title={t("navigation.config")}
         children={
           <Button variant="outline" asChild>
             <Link to="/config/raw">
               <IconCode className="size-4" />
-              {t("pages.config.open_raw", "Raw Config")}
+              {t("pages.config.open_raw")}
             </Link>
           </Button>
         }
@@ -295,23 +266,17 @@ export function ConfigPage() {
         <div className="mx-auto w-full max-w-[1000px] space-y-6">
           {isLoading ? (
             <div className="text-muted-foreground py-6 text-sm">
-              {t("labels.loading", "Loading...")}
+              {t("labels.loading")}
             </div>
           ) : error ? (
             <div className="text-destructive py-6 text-sm">
-              {t(
-                "pages.config.load_error",
-                "Failed to load configuration. Please refresh and try again.",
-              )}
+              {t("pages.config.load_error")}
             </div>
           ) : (
             <div className="space-y-6">
               {isDirty && (
                 <div className="bg-yellow-50 px-3 py-2 text-sm text-yellow-700">
-                  {t(
-                    "pages.config.unsaved_changes",
-                    "You have unsaved changes.",
-                  )}
+                  {t("pages.config.unsaved_changes")}
                 </div>
               )}
 
@@ -356,13 +321,11 @@ export function ConfigPage() {
                   onClick={handleReset}
                   disabled={!isDirty || saving}
                 >
-                  {t("common.reset", "Reset")}
+                  {t("common.reset")}
                 </Button>
                 <Button onClick={handleSave} disabled={!isDirty || saving}>
                   <IconDeviceFloppy className="size-4" />
-                  {saving
-                    ? t("common.saving", "Saving...")
-                    : t("common.save", "Save")}
+                  {saving ? t("common.saving") : t("common.save")}
                 </Button>
               </div>
             </div>

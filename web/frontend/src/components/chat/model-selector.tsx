@@ -40,7 +40,7 @@ export function ModelSelector({
       <SelectContent>
         {apiKeyModels.length > 0 && (
           <SelectGroup>
-            <SelectLabel>{t("chat.modelGroup.apikey", "API Key")}</SelectLabel>
+            <SelectLabel>{t("chat.modelGroup.apikey")}</SelectLabel>
             {apiKeyModels.map((model) => (
               <SelectItem key={model.index} value={model.model_name}>
                 {model.model_name}
@@ -55,7 +55,7 @@ export function ModelSelector({
 
         {oauthModels.length > 0 && (
           <SelectGroup>
-            <SelectLabel>{t("chat.modelGroup.oauth", "OAuth")}</SelectLabel>
+            <SelectLabel>{t("chat.modelGroup.oauth")}</SelectLabel>
             {oauthModels.map((model) => (
               <SelectItem key={model.index} value={model.model_name}>
                 {model.model_name}
@@ -70,7 +70,7 @@ export function ModelSelector({
 
         {localModels.length > 0 && (
           <SelectGroup>
-            <SelectLabel>{t("chat.modelGroup.local", "Local")}</SelectLabel>
+            <SelectLabel>{t("chat.modelGroup.local")}</SelectLabel>
             {localModels.map((model) => (
               <SelectItem key={model.index} value={model.model_name}>
                 {model.model_name}

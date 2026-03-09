@@ -87,10 +87,7 @@ export function AppHeader() {
             <span className="bg-destructive/50 relative flex size-2 shrink-0 items-center justify-center rounded-full">
               <span className="bg-destructive absolute inline-flex size-full animate-ping rounded-full opacity-75"></span>
             </span>
-            {t(
-              "chat.notConnected",
-              "Gateway is not running. Start it to chat.",
-            )}
+            {t("chat.notConnected")}
           </div>
         )}
       </div>
@@ -99,24 +96,19 @@ export function AppHeader() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("header.gateway.stopDialog.title", "Stop Gateway Service?")}
+              {t("header.gateway.stopDialog.title")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t(
-                "header.gateway.stopDialog.description",
-                "Are you sure you want to stop the gateway? This will disconnect your active chat sessions and halt inference.",
-              )}
+              {t("header.gateway.stopDialog.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              {t("common.cancel", "Cancel")}
-            </AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmStop}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t("header.gateway.stopDialog.confirm", "Stop Gateway")}
+              {t("header.gateway.stopDialog.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -146,10 +138,10 @@ export function AppHeader() {
           )}
           <span className="text-xs font-semibold">
             {isRunning
-              ? t("header.gateway.action.stop", "Stop Gateway")
+              ? t("header.gateway.action.stop")
               : isStarting
-                ? t("header.gateway.status.starting", "Starting Gateway...")
-                : t("header.gateway.action.start", "Start Gateway")}
+                ? t("header.gateway.status.starting")
+                : t("header.gateway.action.start")}
           </span>
         </Button>
 

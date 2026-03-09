@@ -34,7 +34,7 @@ export function AnthropicCredentialCard({
   const { t } = useTranslation()
   const actionBusy = activeAction !== ""
   const tokenLoading = activeAction === "anthropic:token"
-  const stopLabel = t("credentials.actions.stopLoading", "Stop Loading")
+  const stopLabel = t("credentials.actions.stopLoading")
 
   return (
     <CredentialCard
@@ -46,10 +46,7 @@ export function AnthropicCredentialCard({
           <span>Anthropic</span>
         </span>
       }
-      description={t(
-        "credentials.providers.anthropic.description",
-        "Uses token login for Claude access.",
-      )}
+      description={t("credentials.providers.anthropic.description")}
       status={status?.status ?? "not_logged_in"}
       authMethod={status?.auth_method}
       actions={
@@ -60,10 +57,7 @@ export function AnthropicCredentialCard({
                 value={token}
                 onChange={(e) => onTokenChange(e.target.value)}
                 type="password"
-                placeholder={t(
-                  "credentials.fields.anthropicToken",
-                  "Anthropic token",
-                )}
+                placeholder={t("credentials.fields.anthropicToken")}
               />
               <Button
                 size="sm"
@@ -75,7 +69,7 @@ export function AnthropicCredentialCard({
                   <IconLoader2 className="size-4 animate-spin" />
                 )}
                 <IconKey className="size-4" />
-                {t("credentials.actions.saveToken", "Save")}
+                {t("credentials.actions.saveToken")}
               </Button>
               {tokenLoading && (
                 <Button
@@ -105,7 +99,7 @@ export function AnthropicCredentialCard({
             {activeAction === "anthropic:logout" && (
               <IconLoader2 className="size-4 animate-spin" />
             )}
-            {t("credentials.actions.logout", "Logout")}
+            {t("credentials.actions.logout")}
           </Button>
         ) : null
       }

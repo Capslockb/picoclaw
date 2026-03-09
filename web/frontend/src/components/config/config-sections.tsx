@@ -44,11 +44,8 @@ export function AgentDefaultsSection({
     <section className="space-y-3">
       <div className="space-y-4">
         <Field
-          label={t("pages.config.workspace", "Workspace Directory")}
-          hint={t(
-            "pages.config.workspace_hint",
-            "Base directory for agent file operations.",
-          )}
+          label={t("pages.config.workspace")}
+          hint={t("pages.config.workspace_hint")}
         >
           <Input
             value={form.workspace}
@@ -58,11 +55,8 @@ export function AgentDefaultsSection({
         </Field>
 
         <SwitchCardField
-          label={t("pages.config.restrict_workspace", "Restrict to Workspace")}
-          hint={t(
-            "pages.config.restrict_workspace_hint",
-            "Only allow file operations inside workspace.",
-          )}
+          label={t("pages.config.restrict_workspace")}
+          hint={t("pages.config.restrict_workspace_hint")}
           checked={form.restrictToWorkspace}
           onCheckedChange={(checked) =>
             onFieldChange("restrictToWorkspace", checked)
@@ -70,11 +64,8 @@ export function AgentDefaultsSection({
         />
 
         <Field
-          label={t("pages.config.max_tokens", "Max Tokens")}
-          hint={t(
-            "pages.config.max_tokens_hint",
-            "Upper token limit per model response.",
-          )}
+          label={t("pages.config.max_tokens")}
+          hint={t("pages.config.max_tokens_hint")}
         >
           <Input
             type="number"
@@ -85,11 +76,8 @@ export function AgentDefaultsSection({
         </Field>
 
         <Field
-          label={t("pages.config.max_tool_iterations", "Max Tool Iterations")}
-          hint={t(
-            "pages.config.max_tool_iterations_hint",
-            "Maximum tool-call loops in a single task.",
-          )}
+          label={t("pages.config.max_tool_iterations")}
+          hint={t("pages.config.max_tool_iterations_hint")}
         >
           <Input
             type="number"
@@ -100,14 +88,8 @@ export function AgentDefaultsSection({
         </Field>
 
         <Field
-          label={t(
-            "pages.config.summarize_threshold",
-            "Summarize Message Threshold",
-          )}
-          hint={t(
-            "pages.config.summarize_threshold_hint",
-            "Start summarization after this many messages.",
-          )}
+          label={t("pages.config.summarize_threshold")}
+          hint={t("pages.config.summarize_threshold_hint")}
         >
           <Input
             type="number"
@@ -120,14 +102,8 @@ export function AgentDefaultsSection({
         </Field>
 
         <Field
-          label={t(
-            "pages.config.summarize_token_percent",
-            "Summarize Token Percent",
-          )}
-          hint={t(
-            "pages.config.summarize_token_percent_hint",
-            "Used when conversation summary is triggered.",
-          )}
+          label={t("pages.config.summarize_token_percent")}
+          hint={t("pages.config.summarize_token_percent_hint")}
         >
           <Input
             type="number"
@@ -159,11 +135,8 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
     <section className="space-y-3">
       <div className="space-y-4">
         <Field
-          label={t("pages.config.session_scope", "Session Scope")}
-          hint={t(
-            "pages.config.session_scope_hint",
-            "How chat context is isolated across peers/channels.",
-          )}
+          label={t("pages.config.session_scope")}
+          hint={t("pages.config.session_scope_hint")}
         >
           <Select
             value={form.dmScope}
@@ -183,11 +156,9 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
               {DM_SCOPE_OPTIONS.map((scope) => (
                 <SelectItem key={scope.value} value={scope.value}>
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-medium">
-                      {t(scope.labelKey, scope.labelDefault)}
-                    </span>
+                    <span className="font-medium">{t(scope.labelKey)}</span>
                     <span className="text-muted-foreground text-xs">
-                      {t(scope.descKey, scope.descDefault)}
+                      {t(scope.descKey)}
                     </span>
                   </div>
                 </SelectItem>
@@ -197,11 +168,8 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
         </Field>
 
         <SwitchCardField
-          label={t("pages.config.heartbeat_enabled", "Heartbeat")}
-          hint={t(
-            "pages.config.heartbeat_enabled_hint",
-            "Send periodic heartbeat messages.",
-          )}
+          label={t("pages.config.heartbeat_enabled")}
+          hint={t("pages.config.heartbeat_enabled_hint")}
           checked={form.heartbeatEnabled}
           onCheckedChange={(checked) =>
             onFieldChange("heartbeatEnabled", checked)
@@ -210,14 +178,8 @@ export function RuntimeSection({ form, onFieldChange }: RuntimeSectionProps) {
 
         {form.heartbeatEnabled && (
           <Field
-            label={t(
-              "pages.config.heartbeat_interval",
-              "Heartbeat Interval (minutes)",
-            )}
-            hint={t(
-              "pages.config.heartbeat_interval_hint",
-              "Interval in minutes between heartbeat signals.",
-            )}
+            label={t("pages.config.heartbeat_interval")}
+            hint={t("pages.config.heartbeat_interval_hint")}
           >
             <Input
               type="number"
@@ -253,11 +215,8 @@ export function LauncherSection({
     <section className="space-y-3">
       <div className="space-y-4">
         <Field
-          label={t("pages.config.server_port", "Service Port")}
-          hint={t(
-            "pages.config.server_port_hint",
-            "HTTP port used by PicoClaw Web.",
-          )}
+          label={t("pages.config.server_port")}
+          hint={t("pages.config.server_port_hint")}
         >
           <Input
             type="number"
@@ -270,30 +229,21 @@ export function LauncherSection({
         </Field>
 
         <SwitchCardField
-          label={t("pages.config.lan_access", "Enable LAN Access")}
-          hint={t(
-            "pages.config.lan_access_hint",
-            "Allow access from other devices on your local network.",
-          )}
+          label={t("pages.config.lan_access")}
+          hint={t("pages.config.lan_access_hint")}
           checked={launcherForm.publicAccess}
           disabled={disabled}
           onCheckedChange={(checked) => onFieldChange("publicAccess", checked)}
         />
 
         <Field
-          label={t("pages.config.allowed_cidrs", "Allowed Network CIDRs")}
-          hint={t(
-            "pages.config.allowed_cidrs_hint",
-            "Only clients from these CIDR ranges can access the service. One per line or comma-separated. Leave empty to allow all.",
-          )}
+          label={t("pages.config.allowed_cidrs")}
+          hint={t("pages.config.allowed_cidrs_hint")}
         >
           <Textarea
             value={launcherForm.allowedCIDRsText}
             disabled={disabled}
-            placeholder={t(
-              "pages.config.allowed_cidrs_placeholder",
-              "192.168.1.0/24\n10.0.0.0/8",
-            )}
+            placeholder={t("pages.config.allowed_cidrs_placeholder")}
             className="min-h-[88px]"
             onChange={(e) => onFieldChange("allowedCIDRsText", e.target.value)}
           />
@@ -328,11 +278,8 @@ export function DevicesSection({
     <section className="space-y-3">
       <div className="space-y-4">
         <SwitchCardField
-          label={t("pages.config.devices_enabled", "Enable Devices")}
-          hint={t(
-            "pages.config.devices_enabled_hint",
-            "Enable hardware-device integrations.",
-          )}
+          label={t("pages.config.devices_enabled")}
+          hint={t("pages.config.devices_enabled_hint")}
           checked={form.devicesEnabled}
           onCheckedChange={(checked) =>
             onFieldChange("devicesEnabled", checked)
@@ -340,17 +287,14 @@ export function DevicesSection({
         />
 
         <SwitchCardField
-          label={t("pages.config.monitor_usb", "Monitor USB")}
-          hint={t(
-            "pages.config.monitor_usb_hint",
-            "Watch USB plug/unplug events when devices are enabled.",
-          )}
+          label={t("pages.config.monitor_usb")}
+          hint={t("pages.config.monitor_usb_hint")}
           checked={form.monitorUSB}
           onCheckedChange={(checked) => onFieldChange("monitorUSB", checked)}
         />
 
         <SwitchCardField
-          label={t("pages.config.autostart_label", "Launch at Login")}
+          label={t("pages.config.autostart_label")}
           hint={autoStartHint}
           checked={autoStartEnabled}
           disabled={autoStartDisabled}
@@ -367,16 +311,13 @@ export function AdvancedSection() {
   return (
     <section className="space-y-3">
       <p className="text-muted-foreground text-sm">
-        {t(
-          "pages.config.advanced_desc",
-          "Open the raw JSON page to edit every field directly.",
-        )}
+        {t("pages.config.advanced_desc")}
       </p>
       <div>
         <Button variant="outline" asChild>
           <Link to="/config/raw">
             <IconCode className="size-4" />
-            {t("pages.config.open_raw", "Raw Config")}
+            {t("pages.config.open_raw")}
           </Link>
         </Button>
       </div>

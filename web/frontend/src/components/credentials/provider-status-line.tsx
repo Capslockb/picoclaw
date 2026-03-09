@@ -26,12 +26,12 @@ export function ProviderStatusLine({
     <div className="flex items-center justify-between gap-2">
       <span className={`rounded px-2 py-1 text-xs font-medium ${style}`}>
         {status === "connected"
-          ? t("credentials.status.connected", "Connected")
+          ? t("credentials.status.connected")
           : status === "needs_refresh"
-            ? t("credentials.status.needsRefresh", "Needs refresh")
+            ? t("credentials.status.needsRefresh")
             : status === "expired"
-              ? t("credentials.status.expired", "Expired")
-              : t("credentials.status.notLoggedIn", "Not logged in")}
+              ? t("credentials.status.expired")
+              : t("credentials.status.notLoggedIn")}
       </span>
       {authMethod && (
         <span className="text-muted-foreground text-xs uppercase">

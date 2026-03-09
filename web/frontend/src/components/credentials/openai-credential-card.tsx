@@ -53,16 +53,13 @@ export function OpenAICredentialCard({
           <span>OpenAI</span>
         </span>
       }
-      description={t(
-        "credentials.providers.openai.description",
-        "Supports browser OAuth, device code, and token login.",
-      )}
+      description={t("credentials.providers.openai.description")}
       status={status?.status ?? "not_logged_in"}
       authMethod={status?.auth_method}
       details={
         status?.account_id ? (
           <p>
-            {t("credentials.labels.account", "Account")}: {status.account_id}
+            {t("credentials.labels.account")}: {status.account_id}
           </p>
         ) : null
       }
@@ -81,7 +78,7 @@ export function OpenAICredentialCard({
                     <IconLoader2 className="size-4 animate-spin" />
                   )}
                   <IconBrandOpenai className="size-4" />
-                  {t("credentials.actions.browser", "Browser OAuth")}
+                  {t("credentials.actions.browser")}
                 </Button>
 
                 {oauthLoading && !deviceLoading && (
@@ -105,7 +102,7 @@ export function OpenAICredentialCard({
                     <IconLoader2 className="size-4 animate-spin" />
                   )}
                   <IconClockHour4 className="size-4" />
-                  {t("credentials.actions.deviceCode", "Device Code")}
+                  {t("credentials.actions.deviceCode")}
                 </Button>
               </div>
             </div>
@@ -116,10 +113,7 @@ export function OpenAICredentialCard({
                   value={token}
                   onChange={(e) => onTokenChange(e.target.value)}
                   type="password"
-                  placeholder={t(
-                    "credentials.fields.openaiToken",
-                    "OpenAI token",
-                  )}
+                  placeholder={t("credentials.fields.openaiToken")}
                 />
                 <Button
                   size="sm"
@@ -130,7 +124,7 @@ export function OpenAICredentialCard({
                     <IconLoader2 className="size-4 animate-spin" />
                   )}
                   <IconKey className="size-4" />
-                  {t("credentials.actions.saveToken", "Save")}
+                  {t("credentials.actions.saveToken")}
                 </Button>
                 {tokenLoading && (
                   <Button
@@ -159,7 +153,7 @@ export function OpenAICredentialCard({
             {activeAction === "openai:logout" && (
               <IconLoader2 className="size-4 animate-spin" />
             )}
-            {t("credentials.actions.logout", "Logout")}
+            {t("credentials.actions.logout")}
           </Button>
         ) : null
       }

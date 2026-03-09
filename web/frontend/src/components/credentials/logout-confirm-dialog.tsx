@@ -34,7 +34,7 @@ export function LogoutConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t("credentials.logoutDialog.title", "Logout provider?")}
+            {t("credentials.logoutDialog.title")}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {t(
@@ -45,10 +45,10 @@ export function LogoutConfirmDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.cancel", "Cancel")}</AlertDialogCancel>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} variant="destructive">
             {isSubmitting && <IconLoader2 className="size-4 animate-spin" />}
-            {t("credentials.actions.logout", "Logout")}
+            {t("credentials.actions.logout")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

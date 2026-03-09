@@ -71,7 +71,7 @@ export function SessionHistoryMenu({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={t("chat.deleteSession", "Delete session")}
+                  aria-label={t("chat.deleteSession")}
                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive absolute top-1/2 right-2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100"
                   onClick={(e) => {
                     e.preventDefault()
@@ -87,7 +87,7 @@ export function SessionHistoryMenu({
           {hasMore && sessions.length > 0 && (
             <div ref={observerRef} className="py-2 text-center">
               <span className="text-muted-foreground animate-pulse text-xs">
-                {t("chat.loadingMore", "Loading more...")}
+                {t("chat.loadingMore")}
               </span>
             </div>
           )}

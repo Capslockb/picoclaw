@@ -6,7 +6,6 @@
     "credentials": "凭据",
     "services": "服务",
     "channels_group": "频道",
-    "channels": "频道",
     "show_more_channels": "更多",
     "show_less_channels": "收起",
     "config": "配置",
@@ -15,25 +14,14 @@
   "chat": {
     "welcome": "今天我能为您做些什么？",
     "welcomeDesc": "您可以询问我天气、设置或其他任何任务，我随时为您效劳。",
-    "model": "模型",
-    "user": "用户",
     "placeholder": "输入新消息...",
-    "attach": "附加文件",
-    "voice": "语音输入",
     "newChat": "新建对话",
-    "connecting": "连接中...",
     "notConnected": "服务未运行，请先启动以进行对话。",
     "thinking": {
       "step1": "思考中...",
       "step2": "分析您的请求...",
       "step3": "准备回复...",
       "step4": "马上就好..."
-    },
-    "time": {
-      "justNow": "刚刚",
-      "minsAgo": "{{count}}分钟前",
-      "hoursAgo": "{{count}}小时前",
-      "daysAgo": "{{count}}天前"
     },
     "history": "历史记录",
     "noHistory": "暂无对话历史",
@@ -79,6 +67,9 @@
     "reset": "重置",
     "confirm": "确认"
   },
+  "labels": {
+    "loading": "加载中..."
+  },
   "credentials": {
     "description": "管理已支持服务商的 OAuth 与 Token 凭据。",
     "loading": "正在加载凭据...",
@@ -102,6 +93,7 @@
     "actions": {
       "browser": "浏览器 OAuth",
       "deviceCode": "设备码",
+      "stopLoading": "停止加载",
       "saveToken": "保存",
       "logout": "退出登录"
     },
@@ -146,9 +138,6 @@
   "models": {
     "description": "为 AI 服务商配置 API Key。只有已配置的模型可用于对话。",
     "loadError": "加载模型列表失败",
-    "header": {
-      "configured": "已配置"
-    },
     "noDefaultHintPrefix": "尚未设置默认模型，点击",
     "noDefaultHintSuffix": "设为默认。",
     "status": {
@@ -185,8 +174,7 @@
     "delete": {
       "title": "确认删除模型？",
       "description": "「{{name}}」将从模型列表中永久移除，此操作不可撤销。",
-      "confirm": "删除",
-      "errorDefault": "无法删除默认模型。请先将其他模型设为默认。"
+      "confirm": "删除"
     },
     "advanced": {
       "toggle": "高级选项"
@@ -221,19 +209,10 @@
     }
   },
   "channels": {
-    "description": "配置消息频道，将 AI 助手连接到各聊天平台。",
     "loadError": "加载频道列表失败",
-    "search": "搜索频道...",
-    "noResults": "没有匹配的频道。",
-    "header": {
-      "enabled": "已启用"
-    },
+    "edit": "配置 {{name}}",
     "status": {
-      "configured": "已配置",
-      "unconfigured": "未配置"
-    },
-    "action": {
-      "configure": "配置"
+      "configured": "已配置"
     },
     "name": {
       "telegram": "Telegram",
@@ -265,7 +244,6 @@
       "encryptKey": "Encrypt Key",
       "baseUrl": "API Base URL",
       "proxy": "HTTP 代理",
-      "proxyHint": "可选。例如 http://127.0.0.1:7890",
       "mentionOnly": "仅提及时响应",
       "typingEnabled": "输入中提示",
       "placeholderEnabled": "占位消息",
@@ -273,32 +251,17 @@
       "groupTriggerMentionOnly": "群聊仅提及时响应",
       "groupTriggerPrefixes": "群聊触发前缀",
       "allowFrom": "允许来源",
-      "allowFromHint": "用逗号分隔的用户/群组 ID 列表，留空表示允许所有。",
       "allowFromPlaceholder": "例如 123456, 789012",
       "allowOrigins": "允许来源域名",
-      "allowOriginsHint": "用逗号分隔允许的 Origin，留空表示允许所有。",
       "allowOriginsPlaceholder": "例如 https://example.com, http://localhost:5173",
       "secretPlaceholder": "输入密钥",
-      "secretPlaceholderSet": "留空保持原有值不变",
       "secretHintSet": "已设置密钥，留空表示不修改。"
-    },
-    "edit": {
-      "title": "配置 {{name}}",
-      "description": "设置此频道的凭据和选项。",
-      "saveError": "保存频道配置失败",
-      "saving": "保存中..."
     },
     "page": {
       "notFound": "不支持频道“{{name}}”。",
       "saveSuccess": "频道配置已保存。",
       "saveError": "保存频道配置失败",
-      "flowTitle": "配置流程",
-      "flowDescription": "按以下步骤完成频道接入并投入使用。",
-      "step1": "填写凭据",
-      "step2": "启用频道",
-      "step3": "保存并重启网关",
       "enabled": "已启用",
-      "disabled": "未启用",
       "docLink": "配置文档",
       "enableLabel": "启用频道"
     },
@@ -316,7 +279,6 @@
         "mentionOnly": "在群聊中仅当明确提及时才响应。",
         "typingEnabled": "在生成回复时显示“正在输入”状态。",
         "placeholderEnabled": "在最终回复发送前，先发送临时占位消息。",
-        "placeholderText": "等待最终回复期间显示的占位文案。",
         "groupTriggerMentionOnly": "在群聊中仅当提及机器人时才响应。",
         "groupTriggerPrefixes": "群聊触发前缀，多个值用逗号分隔。",
         "allowFrom": "允许访问的用户或群组 ID，多个值用逗号分隔。",
@@ -362,23 +324,8 @@
     }
   },
   "pages": {
-    "providers": {
-      "description": "管理各个 AI 模型服务商的接入配置。"
-    },
-    "models": {
-      "description": "在此管理您下载或借用的 AI 模型。"
-    },
-    "credentials": {
-      "description": "安全管理您的 API 密钥与访问凭据。"
-    },
     "config": {
-      "description": "系统配置和偏好设置。",
-      "visual_title": "核心配置",
-      "visual_desc": "这里可编辑关键运行配置；若需完整字段请使用原始配置页。",
       "load_error": "加载配置失败，请刷新后重试。",
-      "section_agents": "智能体默认设置",
-      "section_runtime": "运行时",
-      "section_devices": "设备功能",
       "workspace": "工作目录",
       "workspace_hint": "智能体执行文件读写操作时使用的基础目录。",
       "restrict_workspace": "限制工作目录访问",
@@ -422,10 +369,6 @@
       "allowed_cidrs_placeholder": "192.168.1.0/24\n10.0.0.0/8",
       "launcher_load_error": "加载服务参数失败。",
       "launcher_restart_hint": "服务参数变更需重启 PicoClaw Web 后生效。",
-      "autostart_enable_success": "已开启开机自启。",
-      "autostart_disable_success": "已关闭开机自启。",
-      "autostart_update_error": "更新开机自启设置失败。",
-      "advanced_title": "需要完整配置能力？",
       "advanced_desc": "可打开原始 JSON 页面直接编辑全部字段。",
       "open_raw": "原始配置",
       "back_to_visual": "可视化配置",
@@ -441,7 +384,6 @@
       "format_success": "JSON 格式化成功。",
       "format_error": "JSON 格式无效。",
       "format": "格式化",
-      "lose_unsaved_changes": "您有未保存的更改。确定要重置并丢失这些更改吗？",
       "unsaved_changes": "您有未保存的更改。"
     },
     "logs": {
