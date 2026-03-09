@@ -3,11 +3,14 @@ package channels
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -347,12 +350,193 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
     .access-card a {
       word-break: break-all;
     }
+    .hero-strip {
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .hero-panel {
+      position: relative;
+      overflow: hidden;
+      min-height: 144px;
+      background:
+        radial-gradient(420px 160px at 0% 0%, rgba(74, 184, 255, 0.22), transparent 60%),
+        linear-gradient(160deg, rgba(18, 36, 58, 0.98), rgba(8, 13, 22, 0.98));
+    }
+    .hero-panel::after {
+      content: '';
+      position: absolute;
+      inset: auto -10% -40% auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: rgba(35, 196, 136, 0.12);
+      filter: blur(10px);
+    }
+    .hero-title {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.02;
+    }
+    .hero-copy {
+      max-width: 680px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 0 rgba(35, 196, 136, 0.55);
+      animation: pulse 1.8s infinite;
+    }
+    .terminal-shell {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #060b12;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+    }
+    .terminal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #1e2d46;
+      background: linear-gradient(180deg, #10192a, #0c1320);
+    }
+    .terminal-feed {
+      min-height: 320px;
+      max-height: 420px;
+      overflow: auto;
+      padding: 12px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #b9e8d4;
+      background:
+        linear-gradient(180deg, rgba(5, 12, 18, 0.98), rgba(4, 9, 15, 0.98)),
+        radial-gradient(700px 240px at 100% 0%, rgba(74, 184, 255, 0.08), transparent 60%);
+    }
+    .terminal-entry {
+      padding: 0 0 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px dashed #20324d;
+    }
+    .terminal-entry:last-child {
+      border-bottom: 0;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    .terminal-cmd {
+      color: #9ad4ff;
+      margin-bottom: 6px;
+    }
+    .terminal-output {
+      white-space: pre-wrap;
+      color: #d7f3e7;
+    }
+    .terminal-form {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #1e2d46;
+      background: #0b1220;
+    }
+    .terminal-lock {
+      border: 1px dashed #35557d;
+      border-radius: 12px;
+      padding: 14px;
+      background: rgba(11, 18, 32, 0.86);
+    }
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 8px;
+    }
+    .mini-metric {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid #20324d;
+      border-radius: 10px;
+      background: rgba(15, 23, 39, 0.72);
+    }
+    .mini-metric strong {
+      font-size: 18px;
+    }
+    .anim-rise {
+      animation: riseIn 0.45s ease both;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(35, 196, 136, 0.55); }
+      70% { box-shadow: 0 0 0 12px rgba(35, 196, 136, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(35, 196, 136, 0); }
+    }
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
     @media (max-width: 1180px) {
       .shell { grid-template-columns: 72px 1fr; }
       .sidebar .section-label { display: none; }
       .nav-btn { font-size: 11px; padding: 8px 6px; }
       .chat-layout, .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .hero-strip { grid-template-columns: 1fr; }
+      .topbar { flex-wrap: wrap; align-items: flex-start; }
+      .top-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+    }
+    @media (max-width: 760px) {
+      body { overflow: auto; }
+      .shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto 1fr;
+        min-height: 100vh;
+        height: auto;
+      }
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+        padding: 8px 10px 10px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .sidebar .section-label {
+        display: block;
+        margin-left: 2px;
+      }
+      .nav-btn {
+        display: inline-flex;
+        width: auto;
+        margin: 0 6px 6px 0;
+        padding: 9px 11px;
+        font-size: 12px;
+      }
+      .main {
+        padding: 10px;
+        gap: 10px;
+      }
+      .view-title {
+        font-size: 18px;
+      }
+      .hero-title {
+        font-size: 22px;
+      }
+      .terminal-form {
+        grid-template-columns: 1fr;
+      }
+      .btn {
+        min-height: 40px;
+      }
+      .table-wrap {
+        border-radius: 10px;
+      }
     }
   </style>
 </head>
@@ -385,7 +569,8 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       <button class="nav-btn" data-tab="chat">7. Backend Test Chat</button>
       <button class="nav-btn" data-tab="media">8. Media Workflows</button>
       <button class="nav-btn" data-tab="appgen">9. App Generator</button>
-      <button class="nav-btn" data-tab="logs">10. Logs / Artifacts</button>
+      <button class="nav-btn" data-tab="terminal">10. Secure Terminal</button>
+      <button class="nav-btn" data-tab="logs">11. Logs / Artifacts</button>
     </aside>
 
     <main class="main">
@@ -396,6 +581,26 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
             <p class="view-sub">Cluster-wide runtime, service health, pending setup, and quick validation controls.</p>
           </div>
           <div id="summaryChips"></div>
+        </div>
+        <div class="hero-strip anim-rise">
+          <div class="card hero-panel">
+            <div style="position:relative; z-index:1;">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                <span class="pulse-dot"></span>
+                <span class="chip">Live orchestration</span>
+                <span class="chip">backend-driven fixes</span>
+                <span class="chip">mobile ready</span>
+              </div>
+              <h3 class="hero-title">PicoClaw is now one responsive surface for restore, diagnosis, and repair.</h3>
+              <div class="hero-copy">Use the security page for LLM diagnosis and safe fix buttons, the secure terminal for authenticated operator access, and the backend test console for channel/Telegram/Codex workflow validation without leaving the control plane.</div>
+            </div>
+          </div>
+          <div class="grid" style="grid-template-columns:1fr 1fr;">
+            <div class="mini-metric"><span class="submetric">Operator mode</span><strong>Touch-first</strong><span class="submetric">cards, quick actions, dense mobile layouts</span></div>
+            <div class="mini-metric"><span class="submetric">Recovery mode</span><strong>LLM + Safe Fix</strong><span class="submetric">diagnose, sync scripts, validate secure web</span></div>
+            <div class="mini-metric"><span class="submetric">Terminal policy</span><strong>Login + TS + TLS</strong><span class="submetric">locked unless tailscale + secure origin</span></div>
+            <div class="mini-metric"><span class="submetric">Codex path</span><strong>Pico fallback</strong><span class="submetric">local agent fallback if remote SSH path fails</span></div>
+          </div>
         </div>
         <div class="grid cards" id="serviceCards"></div>
         <div class="grid two">
@@ -474,10 +679,13 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
             <h3>Interactive Diagnostics</h3>
             <div class="toolbar">
               <button class="btn primary" data-action="security_llm_diagnose" data-result-target="securityActionResult">LLM self-diagnose</button>
+              <button class="btn primary" data-action="security_llm_fix_plan" data-result-target="securityActionResult">LLM fix plan</button>
               <button class="btn" data-action="security_check_all" data-result-target="securityActionResult">Refresh posture</button>
               <button class="btn" data-action="security_probe_google_auth" data-result-target="securityActionResult">Google auth</button>
               <button class="btn" data-action="security_probe_secure_web" data-result-target="securityActionResult">Secure web</button>
               <button class="btn" data-action="security_probe_exec_surface" data-result-target="securityActionResult">Exec surface</button>
+              <button class="btn warn" data-action="security_apply_safe_fixes" data-result-target="securityActionResult">Apply safe fixes</button>
+              <button class="btn" data-action="security_sync_codex_fallback" data-result-target="securityActionResult">Sync codex fallback</button>
             </div>
             <div id="securityActionResult" class="mono" style="font-size:12px; color:#cde0ff; white-space:pre-wrap;"></div>
             <div id="securityDiagnosis" style="margin-top:10px;"></div>
@@ -618,6 +826,53 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
         </div>
       </section>
 
+      <section id="view-terminal" class="view">
+        <div class="view-head">
+          <div>
+            <h2 class="view-title">Secure Terminal / Operator Console</h2>
+            <p class="view-sub">Interactive command access for operators. This surface is intentionally blocked unless the request is on tailscale, over HTTPS, and logged in.</p>
+          </div>
+          <div id="terminalStatePill"></div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <h3>Access Policy</h3>
+            <div id="terminalPolicy" class="kv"></div>
+            <div class="quick-grid" style="margin-top:10px;" id="terminalQuick"></div>
+          </div>
+          <div class="card">
+            <h3>Login</h3>
+            <div id="terminalLock" class="terminal-lock">
+              <p style="margin-top:0;">Use the terminal login password only from the hardened tailscale HTTPS surface. Public IP + plain HTTP is rejected.</p>
+              <form id="terminalLoginForm">
+                <label>Terminal password</label>
+                <input id="terminalPassword" class="input" type="password" placeholder="login required for terminal commands" />
+                <div class="toolbar" style="margin-top:10px;">
+                  <button class="btn primary" type="submit">Unlock terminal</button>
+                  <button class="btn" type="button" id="terminalLogoutBtn">Logout</button>
+                </div>
+              </form>
+              <div id="terminalLoginInfo" class="mono" style="font-size:11px; color:#9db9df;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="terminal-shell anim-rise">
+          <div class="terminal-head">
+            <div>
+              <strong>Operator Terminal</strong>
+              <div class="submetric">Runs in the Pico workspace with short timeout and session history.</div>
+            </div>
+            <div id="terminalHeadMeta" class="mono" style="font-size:11px;"></div>
+          </div>
+          <div id="terminalFeed" class="terminal-feed">Terminal locked.</div>
+          <form id="terminalForm" class="terminal-form">
+            <input id="terminalCommand" class="input mono" placeholder="journalctl -u picoclaw -n 60 --no-pager" />
+            <button class="btn primary" type="submit">Run</button>
+            <button class="btn" type="button" id="terminalRefreshBtn">Refresh</button>
+          </form>
+        </div>
+      </section>
+
       <section id="view-logs" class="view">
         <div class="view-head">
           <div>
@@ -659,7 +914,11 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       chat: '/api/control-plane/test-chat',
       history: '/api/control-plane/test-chat/history',
       action: '/api/control-plane/action',
-      logs: '/api/control-plane/logs'
+      logs: '/api/control-plane/logs',
+      terminalStatus: '/api/control-plane/terminal/status',
+      terminalLogin: '/api/control-plane/terminal/login',
+      terminalLogout: '/api/control-plane/terminal/logout',
+      terminalExec: '/api/control-plane/terminal/exec'
     };
 
     const app = {
@@ -667,7 +926,8 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       pollMs: 10000,
       polling: true,
       status: null,
-      chatHistory: []
+      chatHistory: [],
+      terminal: null
     };
 
     function esc(v) {
@@ -955,6 +1215,54 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       }).join('') || 'No app generation status records.';
     }
 
+    function renderTerminal(data) {
+      const status = data || {};
+      app.terminal = status;
+      const pills = [
+        pill(status.allowed ? 'ok' : 'warn'),
+        pill(status.authenticated ? 'ok' : 'warn')
+      ].join(' ');
+      document.getElementById('terminalStatePill').innerHTML = pills;
+
+      document.getElementById('terminalPolicy').innerHTML =
+        '<div class="k">host</div><div>' + esc(status.host || '-') + '</div>' +
+        '<div class="k">tailscale</div><div>' + esc(status.tailscale) + '</div>' +
+        '<div class="k">secure</div><div>' + esc(status.secure) + '</div>' +
+        '<div class="k">login configured</div><div>' + esc(status.login_configured) + '</div>' +
+        '<div class="k">reason</div><div>' + esc(status.reason || '-') + '</div>';
+
+      document.getElementById('terminalQuick').innerHTML = (status.suggestions || []).map(function (cmd) {
+        return '<button class="btn" type="button" data-terminal-suggest="' + esc(cmd) + '">' + esc(cmd) + '</button>';
+      }).join('');
+
+      document.getElementById('terminalHeadMeta').textContent =
+        (status.tailscale ? 'tailscale' : 'non-tailscale') + ' • ' +
+        (status.secure ? 'https' : 'insecure') + ' • ' +
+        (status.authenticated ? 'authenticated' : 'locked');
+
+      const history = status.history || [];
+      document.getElementById('terminalFeed').innerHTML = history.length ? history.map(function (entry) {
+        return '<div class="terminal-entry">'
+          + '<div class="terminal-cmd">$ ' + esc(entry.command) + ' <span class="submetric">[' + esc(entry.status) + ' / exit ' + esc(entry.exit_code) + ']</span></div>'
+          + '<div class="terminal-output">' + esc(entry.output || '') + '</div>'
+          + '<div class="submetric" style="margin-top:6px;">' + esc(entry.at || '') + '</div>'
+          + '</div>';
+      }).join('') : 'Terminal locked.';
+
+      document.getElementById('terminalCommand').disabled = !status.allowed || !status.authenticated;
+      document.querySelector('#terminalForm button[type="submit"]').disabled = !status.allowed || !status.authenticated;
+      document.getElementById('terminalLock').style.display = status.allowed && status.authenticated ? 'none' : 'block';
+    }
+
+    async function refreshTerminalStatus() {
+      try {
+        const data = await fetchJSON(API.terminalStatus, { cache: 'no-store' });
+        renderTerminal(data);
+      } catch (err) {
+        document.getElementById('terminalFeed').textContent = 'Failed to load terminal status: ' + err.message;
+      }
+    }
+
     async function refreshLogs() {
       const source = document.getElementById('logsSource').value;
       const search = document.getElementById('logsSearch').value;
@@ -988,6 +1296,7 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
         renderMedia(data);
         renderAppGen(data);
         renderArtifacts(data);
+        await refreshTerminalStatus();
       } catch (err) {
         document.getElementById('globalStatus').className = 'status-pill status-error';
         document.getElementById('globalStatus').textContent = 'error: ' + err.message;
@@ -1100,6 +1409,51 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       }
     }
 
+    async function submitTerminalLogin(ev) {
+      ev.preventDefault();
+      const password = document.getElementById('terminalPassword').value;
+      try {
+        await fetchJSON(API.terminalLogin, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: password })
+        });
+        document.getElementById('terminalPassword').value = '';
+        document.getElementById('terminalLoginInfo').textContent = 'Terminal unlocked.';
+        await refreshTerminalStatus();
+      } catch (err) {
+        document.getElementById('terminalLoginInfo').textContent = 'Terminal login failed: ' + err.message;
+      }
+    }
+
+    async function submitTerminalCommand(ev) {
+      ev.preventDefault();
+      const command = document.getElementById('terminalCommand').value.trim();
+      if (!command) return;
+      try {
+        const data = await fetchJSON(API.terminalExec, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ command: command })
+        });
+        document.getElementById('terminalCommand').value = '';
+        renderTerminal(data.status || app.terminal || {});
+      } catch (err) {
+        document.getElementById('terminalLoginInfo').textContent = 'Terminal command failed: ' + err.message;
+        await refreshTerminalStatus();
+      }
+    }
+
+    async function logoutTerminal() {
+      try {
+        await fetchJSON(API.terminalLogout, { method: 'POST' });
+        document.getElementById('terminalLoginInfo').textContent = 'Terminal logged out.';
+      } catch (err) {
+        document.getElementById('terminalLoginInfo').textContent = 'Terminal logout failed: ' + err.message;
+      }
+      await refreshTerminalStatus();
+    }
+
     function bindEvents() {
       document.querySelectorAll('.nav-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
@@ -1123,6 +1477,10 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       document.getElementById('chatForm').addEventListener('submit', submitChat);
       document.getElementById('savePresetBtn').addEventListener('click', savePreset);
       document.getElementById('loadPresetBtn').addEventListener('click', loadPreset);
+      document.getElementById('terminalLoginForm').addEventListener('submit', submitTerminalLogin);
+      document.getElementById('terminalForm').addEventListener('submit', submitTerminalCommand);
+      document.getElementById('terminalLogoutBtn').addEventListener('click', logoutTerminal);
+      document.getElementById('terminalRefreshBtn').addEventListener('click', refreshTerminalStatus);
 
       document.getElementById('logsRefreshBtn').addEventListener('click', refreshLogs);
       document.getElementById('logsSearch').addEventListener('keydown', function (ev) {
@@ -1144,6 +1502,12 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
         runAction(btn.dataset.action, '', {}, btn.dataset.resultTarget || 'securityActionResult');
       });
 
+      document.querySelector('#view-terminal').addEventListener('click', function (ev) {
+        const btn = ev.target.closest('button[data-terminal-suggest]');
+        if (!btn) return;
+        document.getElementById('terminalCommand').value = btn.dataset.terminalSuggest;
+      });
+
       document.getElementById('nodesTable').addEventListener('click', function (ev) {
         const btn = ev.target.closest('button[data-node-action]');
         if (!btn) return;
@@ -1162,6 +1526,7 @@ var controlPlaneTemplate = template.Must(template.New("control_plane_dashboard")
       if (app.polling) {
         await refreshStatus();
         await refreshChatHistory();
+        await refreshTerminalStatus();
       }
       setTimeout(tick, app.pollMs);
     }
@@ -1321,6 +1686,26 @@ type controlSecurityDiagnosis struct {
 	LastJobID string `json:"last_job_id"`
 }
 
+type controlTerminalStatus struct {
+	Allowed         bool                   `json:"allowed"`
+	Authenticated   bool                   `json:"authenticated"`
+	Secure          bool                   `json:"secure"`
+	Tailscale       bool                   `json:"tailscale"`
+	LoginConfigured bool                   `json:"login_configured"`
+	Reason          string                 `json:"reason"`
+	Host            string                 `json:"host"`
+	History         []controlTerminalEntry `json:"history"`
+	Suggestions     []string               `json:"suggestions"`
+}
+
+type controlTerminalEntry struct {
+	At       string `json:"at"`
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+	Status   string `json:"status"`
+}
+
 type controlChecklistItem struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -1434,16 +1819,18 @@ type controlWebhook struct {
 }
 
 type controlPlaneState struct {
-	mu          sync.Mutex
-	address     string
-	startedAt   time.Time
-	nextJob     int
-	jobs        map[string]*controlJob
-	jobOrder    []string
-	chatHistory []controlChatMessage
-	actionLog   []string
-	sshCache    map[string]sshProbe
-	diagnosis   controlSecurityDiagnosis
+	mu               sync.Mutex
+	address          string
+	startedAt        time.Time
+	nextJob          int
+	jobs             map[string]*controlJob
+	jobOrder         []string
+	chatHistory      []controlChatMessage
+	actionLog        []string
+	sshCache         map[string]sshProbe
+	diagnosis        controlSecurityDiagnosis
+	terminalHistory  []controlTerminalEntry
+	terminalSessions map[string]time.Time
 }
 
 type controlJobRequest struct {
@@ -1469,9 +1856,10 @@ func getControlPlaneState(m *Manager) *controlPlaneState {
 		return v.(*controlPlaneState)
 	}
 	st := &controlPlaneState{
-		startedAt: time.Now(),
-		jobs:      make(map[string]*controlJob),
-		sshCache:  make(map[string]sshProbe),
+		startedAt:        time.Now(),
+		jobs:             make(map[string]*controlJob),
+		sshCache:         make(map[string]sshProbe),
+		terminalSessions: make(map[string]time.Time),
 	}
 	seedControlPlaneState(st)
 	actual, _ := controlPlaneStates.LoadOrStore(m, st)
@@ -1600,6 +1988,33 @@ func (m *Manager) registerControlPlaneRoutes(addr string) {
 			lines = filtered
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"source": source, "lines": lines})
+	})
+
+	m.mux.HandleFunc("GET /api/control-plane/terminal/status", func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, m.buildTerminalStatus(r))
+	})
+
+	m.mux.HandleFunc("POST /api/control-plane/terminal/login", func(w http.ResponseWriter, r *http.Request) {
+		status, err := m.handleTerminalLogin(w, r)
+		if err != nil {
+			respondJSON(w, http.StatusForbidden, map[string]any{"error": err.Error(), "status": status})
+			return
+		}
+		respondJSON(w, http.StatusOK, status)
+	})
+
+	m.mux.HandleFunc("POST /api/control-plane/terminal/logout", func(w http.ResponseWriter, r *http.Request) {
+		m.handleTerminalLogout(w, r)
+		respondJSON(w, http.StatusOK, m.buildTerminalStatus(r))
+	})
+
+	m.mux.HandleFunc("POST /api/control-plane/terminal/exec", func(w http.ResponseWriter, r *http.Request) {
+		result, err := m.handleTerminalExec(r)
+		if err != nil {
+			respondJSON(w, http.StatusForbidden, map[string]any{"error": err.Error(), "result": result})
+			return
+		}
+		respondJSON(w, http.StatusOK, result)
 	})
 }
 
@@ -2201,6 +2616,14 @@ func (m *Manager) buildSecurityState(
 			Exposure: "secure web candidate",
 			Notes:    "Use this as the hardened web-auth target once serve/cert policy is finalized.",
 		},
+		{
+			Name:     "Interactive terminal",
+			URL:      joinURL(controlPlaneHTTPSBase(selfNode, certFiles), "/dash/control#terminal"),
+			Status:   ternaryStatus(controlPlaneTerminalSecret(m) != "", "ok", "warn"),
+			Auth:     ternaryText(controlPlaneTerminalSecret(m) != "", "login required", "login secret missing"),
+			Exposure: "tailscale + https only",
+			Notes:    "Terminal execution is intentionally gated behind tailscale origin checks, HTTPS, and session login.",
+		},
 	}
 
 	score := 100 - criticalCount*22 - warnCount*8
@@ -2587,6 +3010,53 @@ func (m *Manager) runControlPlaneSecurityDiagnosis() (controlSecurityDiagnosis, 
 	return diag, err
 }
 
+func (m *Manager) runControlPlaneFixPlan() (controlSecurityDiagnosis, error) {
+	status := m.buildControlPlaneStatus(getControlPlaneState(m).address)
+	diagnoser := m.getControlPlaneDiagnoser()
+	if diagnoser == nil {
+		diag := controlSecurityDiagnosis{
+			Status:    "warn",
+			LastRunAt: time.Now().Format(time.RFC3339),
+			Source:    "backend",
+			LastError: "LLM fix planner unavailable",
+			Summary:   "No LLM fix planner is configured for the control plane.",
+		}
+		return diag, errors.New("llm fix planner unavailable")
+	}
+
+	snapshot := map[string]any{
+		"summary":        status.Security.Summary,
+		"domains":        status.Security.Domains,
+		"findings":       status.Security.Findings,
+		"access":         status.Security.Access,
+		"pending_setup":  status.PendingSetup,
+		"tailscale":      status.Tailscale.Warnings,
+		"service_status": summarizeServiceStatuses(status.Services),
+	}
+	payload, _ := json.MarshalIndent(snapshot, "", "  ")
+	prompt := "You are generating a PicoClaw control-plane remediation plan. " +
+		"Do not call tools. Use only the supplied snapshot. " +
+		"Return: 1) top 5 fixes ordered by impact, 2) which are safe to automate now, 3) which need human validation, 4) a short mobile-operator summary.\n\n" +
+		string(payload)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	text, err := diagnoser(ctx, prompt)
+	diag := controlSecurityDiagnosis{
+		Status:    ternaryStatus(err == nil, "ok", "error"),
+		LastRunAt: time.Now().Format(time.RFC3339),
+		Source:    "llm-fix-plan",
+		Summary:   strings.TrimSpace(text),
+	}
+	if err != nil {
+		diag.LastError = err.Error()
+		if diag.Summary == "" {
+			diag.Summary = "LLM fix plan failed."
+		}
+	}
+	return diag, err
+}
+
 func (m *Manager) securityGoogleProbe() map[string]any {
 	gwsPath := filepath.Join(homeDir(), ".config", "gws", "credentials.json")
 	clientSecret := filepath.Join(homeDir(), ".config", "gws", "client_secret.json")
@@ -2665,6 +3135,22 @@ func (m *Manager) handleControlPlaneAction(action, target string, payload map[st
 		result["security"] = status.Security
 		result["summary"] = status.Security.Summary
 		return result, nil
+	case "security_apply_safe_fixes":
+		changed, err := m.applySafeControlPlaneFixes()
+		result["changed"] = changed
+		if err != nil {
+			return result, err
+		}
+		result["message"] = "safe fixes applied"
+		return result, nil
+	case "security_sync_codex_fallback":
+		changed, err := m.syncCodexFallbackScripts()
+		result["changed"] = changed
+		if err != nil {
+			return result, err
+		}
+		result["message"] = "codex fallback scripts synchronized"
+		return result, nil
 	case "security_probe_google_auth":
 		result["probe"] = m.securityGoogleProbe()
 		return result, nil
@@ -2677,6 +3163,13 @@ func (m *Manager) handleControlPlaneAction(action, target string, payload map[st
 	case "security_llm_diagnose":
 		diagnosis, err := m.runControlPlaneSecurityDiagnosis()
 		result["diagnosis"] = diagnosis
+		if err != nil {
+			return result, err
+		}
+		return result, nil
+	case "security_llm_fix_plan":
+		plan, err := m.runControlPlaneFixPlan()
+		result["plan"] = plan
 		if err != nil {
 			return result, err
 		}
@@ -2823,6 +3316,240 @@ func (m *Manager) cancelJob(jobID string) (map[string]any, error) {
 	st.chatHistory = append(st.chatHistory, controlChatMessage{Role: "system", Content: "job canceled: " + jobID, CreatedAt: time.Now().Format(time.RFC3339)})
 	trimStateHistory(st)
 	return map[string]any{"action": "cancel_job", "job_id": jobID, "state": "failed"}, nil
+}
+
+func (m *Manager) applySafeControlPlaneFixes() ([]string, error) {
+	changed := []string{}
+
+	if synced, err := m.syncCodexFallbackScripts(); err == nil {
+		changed = append(changed, synced...)
+	} else {
+		return changed, err
+	}
+
+	servePath := filepath.Join(m.config.WorkspacePath(), "ts-serve-picoclaw.json")
+	if !fileExists(servePath) {
+		content := []byte("{\n  \"TCP\": {\n    \"443\": {\n      \"HTTPS\": true\n    }\n  },\n  \"Web\": {\n    \"black-wave.tailb9e21e.ts.net:443\": {\n      \"Handlers\": {\n        \"/\": {\n          \"Proxy\": \"http://127.0.0.1:3000\"\n        }\n      }\n    }\n  }\n}\n")
+		if err := os.WriteFile(servePath, content, 0600); err != nil {
+			return changed, err
+		}
+		changed = append(changed, servePath)
+	}
+
+	return changed, nil
+}
+
+func (m *Manager) syncCodexFallbackScripts() ([]string, error) {
+	workspace := m.config.WorkspacePath()
+	files := map[string]string{
+		filepath.Join(workspace, "wsl-codex-exec"): desiredCodexExecScript(),
+		filepath.Join(workspace, "node-exec"):      desiredNodeExecScript(),
+		filepath.Join(workspace, "node-ssh"):       desiredNodeSSHScript(),
+	}
+
+	changed := make([]string, 0, len(files))
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+			return changed, err
+		}
+		changed = append(changed, path)
+	}
+	return changed, nil
+}
+
+func (m *Manager) buildTerminalStatus(r *http.Request) controlTerminalStatus {
+	st := getControlPlaneState(m)
+	st.mu.Lock()
+	m.pruneTerminalSessionsLocked(st)
+	history := append([]controlTerminalEntry(nil), st.terminalHistory...)
+	st.mu.Unlock()
+
+	if len(history) > 18 {
+		history = history[len(history)-18:]
+	}
+
+	host := hostOnly(r.Host)
+	secure := isSecureControlRequest(r)
+	tailscale := isTailscaleControlRequest(r)
+	secretConfigured := controlPlaneTerminalSecret(m) != ""
+	authenticated := m.isTerminalAuthenticated(r)
+	allowed := secure && tailscale && secretConfigured
+
+	reason := "ready"
+	switch {
+	case !secretConfigured:
+		reason = "terminal login secret is not configured"
+	case !tailscale:
+		reason = "terminal requires a tailscale origin"
+	case !secure:
+		reason = "terminal requires https/tailscale cert"
+	case !authenticated:
+		reason = "login required"
+	}
+
+	return controlTerminalStatus{
+		Allowed:         allowed,
+		Authenticated:   authenticated,
+		Secure:          secure,
+		Tailscale:       tailscale,
+		LoginConfigured: secretConfigured,
+		Reason:          reason,
+		Host:            host,
+		History:         history,
+		Suggestions: []string{
+			"pwd",
+			"ls -la",
+			"tailscale status --json | sed -n '1,120p'",
+			"systemctl status picoclaw --no-pager",
+			"journalctl -u picoclaw -n 60 --no-pager",
+		},
+	}
+}
+
+func (m *Manager) handleTerminalLogin(w http.ResponseWriter, r *http.Request) (controlTerminalStatus, error) {
+	status := m.buildTerminalStatus(r)
+	if !status.Secure || !status.Tailscale {
+		return status, errors.New(status.Reason)
+	}
+	secret := controlPlaneTerminalSecret(m)
+	if secret == "" {
+		return status, errors.New("terminal login is not configured")
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		return status, errors.New("invalid request")
+	}
+	if strings.TrimSpace(req.Password) == "" || strings.TrimSpace(req.Password) != secret {
+		return status, errors.New("invalid terminal password")
+	}
+
+	token, err := randomHex(24)
+	if err != nil {
+		return status, err
+	}
+
+	st := getControlPlaneState(m)
+	st.mu.Lock()
+	st.terminalSessions[token] = time.Now().Add(12 * time.Hour)
+	st.mu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "pcp_terminal",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   12 * 60 * 60,
+	})
+
+	return m.buildTerminalStatus(r), nil
+}
+
+func (m *Manager) handleTerminalLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie("pcp_terminal"); err == nil {
+		st := getControlPlaneState(m)
+		st.mu.Lock()
+		delete(st.terminalSessions, c.Value)
+		st.mu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "pcp_terminal",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
+
+func (m *Manager) handleTerminalExec(r *http.Request) (map[string]any, error) {
+	status := m.buildTerminalStatus(r)
+	if !status.Allowed {
+		return map[string]any{"status": status}, errors.New(status.Reason)
+	}
+	if !status.Authenticated {
+		return map[string]any{"status": status}, errors.New("terminal login required")
+	}
+
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		return map[string]any{"status": status}, errors.New("invalid request")
+	}
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		return map[string]any{"status": status}, errors.New("command is required")
+	}
+	if len(command) > 800 {
+		return map[string]any{"status": status}, errors.New("command too long")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
+	cmd.Dir = m.config.WorkspacePath()
+	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if len(text) > 12000 {
+		text = text[:12000] + "\n...[truncated]"
+	}
+
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+		if text == "" {
+			text = err.Error()
+		}
+	}
+
+	entry := controlTerminalEntry{
+		At:       time.Now().Format(time.RFC3339),
+		Command:  command,
+		Output:   text,
+		ExitCode: exitCode,
+		Status:   ternaryStatus(exitCode == 0, "ok", "error"),
+	}
+
+	st := getControlPlaneState(m)
+	st.mu.Lock()
+	st.terminalHistory = append(st.terminalHistory, entry)
+	if len(st.terminalHistory) > 40 {
+		st.terminalHistory = st.terminalHistory[len(st.terminalHistory)-40:]
+	}
+	st.mu.Unlock()
+
+	return map[string]any{"entry": entry, "status": m.buildTerminalStatus(r)}, nil
+}
+
+func (m *Manager) isTerminalAuthenticated(r *http.Request) bool {
+	c, err := r.Cookie("pcp_terminal")
+	if err != nil || strings.TrimSpace(c.Value) == "" {
+		return false
+	}
+	st := getControlPlaneState(m)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	m.pruneTerminalSessionsLocked(st)
+	expiresAt, ok := st.terminalSessions[c.Value]
+	return ok && time.Now().Before(expiresAt)
+}
+
+func (m *Manager) pruneTerminalSessionsLocked(st *controlPlaneState) {
+	now := time.Now()
+	for token, expiresAt := range st.terminalSessions {
+		if now.After(expiresAt) {
+			delete(st.terminalSessions, token)
+		}
+	}
 }
 
 func (m *Manager) loadLogs(source string) []string {
@@ -3069,6 +3796,9 @@ func trimStateHistory(st *controlPlaneState) {
 	}
 	if len(st.actionLog) > 250 {
 		st.actionLog = st.actionLog[len(st.actionLog)-250:]
+	}
+	if len(st.terminalHistory) > 40 {
+		st.terminalHistory = st.terminalHistory[len(st.terminalHistory)-40:]
 	}
 }
 
@@ -3379,6 +4109,191 @@ func humanSize(n int64) string {
 		i++
 	}
 	return fmt.Sprintf("%.1f%s", f, units[i])
+}
+
+func controlPlaneTerminalSecret(m *Manager) string {
+	if v := strings.TrimSpace(os.Getenv("PICOCLAW_TERMINAL_PASSWORD")); v != "" {
+		return v
+	}
+	tokenPath := filepath.Join(m.config.WorkspacePath(), ".control-plane-terminal-token")
+	if b, err := os.ReadFile(tokenPath); err == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(m.config.Channels.Pico.Token)
+}
+
+func isSecureControlRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+		return true
+	}
+	host := hostOnly(r.Host)
+	return strings.Contains(host, ".ts.net")
+}
+
+func isTailscaleControlRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host := hostOnly(r.Host)
+	if strings.Contains(host, ".ts.net") {
+		return true
+	}
+	for _, candidate := range []string{
+		strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]),
+		strings.TrimSpace(r.Header.Get("X-Real-IP")),
+		remoteAddrIP(r.RemoteAddr),
+	} {
+		if candidate == "" {
+			continue
+		}
+		ip := net.ParseIP(candidate)
+		if ip == nil {
+			continue
+		}
+		if isTailscaleIP(ip) || ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
+func isTailscaleIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127
+	}
+	return strings.HasPrefix(strings.ToLower(ip.String()), "fd7a:115c:a1e0:")
+}
+
+func remoteAddrIP(addr string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(addr)
+}
+
+func hostOnly(addr string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(addr)
+}
+
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func desiredCodexExecScript() string {
+	return "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n\n" +
+		"TS_HOST=\"${TS_HOST:-black-wave}\"\n" +
+		"LOCAL_HOST=\"$(hostname)\"\n" +
+		"LOCAL_IP=\"$(tailscale ip -4 2>/dev/null | head -n1 || echo '')\"\n\n" +
+		"if [ \"$#\" -lt 1 ]; then\n" +
+		"  echo \"usage: wsl-codex-exec <health-check|status|prompt> [target]\"\n" +
+		"  exit 2\n" +
+		"fi\n\n" +
+		"is_local() {\n" +
+		"  local target=\"$1\"\n" +
+		"  [[ \"$target\" == \"localhost\" ]] || [[ \"$target\" == \"$LOCAL_HOST\" ]] || [[ \"$target\" == \"$LOCAL_IP\" ]] || [[ \"$target\" == \"127.0.0.1\" ]]\n" +
+		"}\n\n" +
+		"run_picoclaw_local() {\n" +
+		"  local prompt=\"$1\"\n" +
+		"  /usr/local/bin/picoclaw agent --model \"${PICO_CLI_MODEL:-gpt-5.2}\" -m \"$prompt\"\n" +
+		"}\n\n" +
+		"run_remote_codex() {\n" +
+		"  local target=\"$1\"\n" +
+		"  local prompt=\"$2\"\n" +
+		"  local remote_cmd=\"cat >/tmp/codex_prompt.txt && chown caps:caps /tmp/codex_prompt.txt && su - caps -c 'cd /home/caps && codex exec --sandbox workspace-write --ask-for-approval never \\\"\\$(cat /tmp/codex_prompt.txt)\\\"'\"\n" +
+		"  printf '%s' \"$prompt\" | tailscale ssh root@\"$target\" \"$remote_cmd\"\n" +
+		"}\n\n" +
+		"CMD=\"$1\"\n" +
+		"TARGET=\"${2:-$TS_HOST}\"\n\n" +
+		"case \"$CMD\" in\n" +
+		"  health-check)\n" +
+		"    if is_local \"$TARGET\"; then\n" +
+		"      echo \"=== LOCAL PICO HEALTH CHECK ===\"\n" +
+		"      echo \"Host: $(hostname)\"\n" +
+		"      echo \"User: $(whoami)\"\n" +
+		"      uptime\n" +
+		"      df -h /\n" +
+		"      echo \"Fallback: local picoclaw agent available\"\n" +
+		"    else\n" +
+		"      echo \"=== REMOTE HEALTH CHECK ($TARGET) ===\"\n" +
+		"      if ! tailscale ssh root@\"$TARGET\" 'echo \"Host: $(hostname)\"; echo \"User: $(whoami)\"; uptime; df -h /' ; then\n" +
+		"        echo \"remote tailscale ssh unavailable; local pico fallback ready\"\n" +
+		"      fi\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"  status)\n" +
+		"    if is_local \"$TARGET\"; then\n" +
+		"      echo \"=== LOCAL STATUS ===\"\n" +
+		"      tailscale status 2>/dev/null || true\n" +
+		"      systemctl --failed 2>/dev/null || true\n" +
+		"      echo \"model=${PICO_CLI_MODEL:-gpt-5.2}\"\n" +
+		"    else\n" +
+		"      echo \"=== REMOTE STATUS ($TARGET) ===\"\n" +
+		"      if ! tailscale ssh root@\"$TARGET\" 'tailscale status 2>/dev/null || true; systemctl --failed 2>/dev/null || true' ; then\n" +
+		"        echo \"remote tailscale ssh unavailable; local pico fallback ready\"\n" +
+		"      fi\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"  *)\n" +
+		"    PROMPT=\"$CMD\"\n" +
+		"    if is_local \"$TARGET\"; then\n" +
+		"      echo \"[LOCAL PICO AGENT]\"\n" +
+		"      run_picoclaw_local \"$PROMPT\"\n" +
+		"    else\n" +
+		"      echo \"[REMOTE EXEC -> $TARGET]\"\n" +
+		"      if ! run_remote_codex \"$TARGET\" \"$PROMPT\"; then\n" +
+		"        echo \"[REMOTE FAILED -> LOCAL PICO AGENT FALLBACK]\" >&2\n" +
+		"        run_picoclaw_local \"$PROMPT\"\n" +
+		"      fi\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"esac\n"
+}
+
+func desiredNodeExecScript() string {
+	return "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n\n" +
+		"TARGET=\"${1:-}\"\n" +
+		"shift || true\n" +
+		"CMD=\"$*\"\n" +
+		"LOCAL_HOST=\"$(hostname)\"\n" +
+		"TS_IP=\"$(tailscale ip -4 2>/dev/null | head -n1 || true)\"\n\n" +
+		"if [[ -z \"$TARGET\" || \"$TARGET\" == \"localhost\" || \"$TARGET\" == \"$LOCAL_HOST\" || \"$TARGET\" == \"$TS_IP\" ]]; then\n" +
+		"  exec bash -lc \"$CMD\"\n" +
+		"fi\n\n" +
+		"exec tailscale ssh \"root@${TARGET}\" \"$CMD\"\n"
+}
+
+func desiredNodeSSHScript() string {
+	return "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n\n" +
+		"if [ $# -lt 2 ]; then\n" +
+		"  echo \"Usage: $0 <host> <command>\"\n" +
+		"  exit 1\n" +
+		"fi\n\n" +
+		"HOST=\"$1\"\n" +
+		"shift\n" +
+		"exec tailscale ssh \"root@${HOST}\" \"$*\"\n"
 }
 
 func homeDir() string {
