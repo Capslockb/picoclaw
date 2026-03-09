@@ -531,10 +531,24 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	messageID := fmt.Sprintf("%d", message.MessageID)
 
 	metadata := map[string]string{
-		"user_id":    fmt.Sprintf("%d", user.ID),
-		"username":   user.Username,
-		"first_name": user.FirstName,
-		"is_group":   fmt.Sprintf("%t", message.Chat.Type != "private"),
+		"user_id":          fmt.Sprintf("%d", user.ID),
+		"username":         user.Username,
+		"first_name":       user.FirstName,
+		"is_group":         fmt.Sprintf("%t", message.Chat.Type != "private"),
+		"user_profile_key": sender.CanonicalID,
+	}
+
+	if adminBody, adminRequested := parseAdminEscalation(content, c.botUsername()); adminRequested {
+		if !c.isAdminUser(platformID) {
+			return c.sendPlainText(ctx, chatID, "Admin escalation denied for this Telegram account.")
+		}
+		if strings.TrimSpace(adminBody) == "" {
+			return c.sendPlainText(ctx, chatID, "Usage: /admin <instruction>")
+		}
+		content = adminBody
+		metadata["admin_escalated"] = "true"
+		metadata["admin_user_id"] = platformID
+		metadata["admin_user"] = sender.CanonicalID
 	}
 
 	c.HandleMessage(c.ctx,
@@ -548,6 +562,56 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		sender,
 	)
 	return nil
+}
+
+func (c *TelegramChannel) isAdminUser(userID string) bool {
+	for _, allowed := range c.config.Channels.Telegram.AdminIDs {
+		if strings.TrimSpace(allowed) == strings.TrimSpace(userID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *TelegramChannel) botUsername() string {
+	if c == nil || c.bot == nil {
+		return ""
+	}
+	return c.bot.Username()
+}
+
+func parseAdminEscalation(content, botUsername string) (string, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case lower == "/admin":
+		return "", true
+	case strings.HasPrefix(lower, "/admin "):
+		return strings.TrimSpace(trimmed[len("/admin "):]), true
+	case botUsername != "" && (lower == strings.ToLower("/admin@"+botUsername)):
+		return "", true
+	case botUsername != "" && strings.HasPrefix(lower, strings.ToLower("/admin@"+botUsername+" ")):
+		prefixLen := len("/admin@" + botUsername + " ")
+		return strings.TrimSpace(trimmed[prefixLen:]), true
+	case lower == "!admin":
+		return "", true
+	case strings.HasPrefix(lower, "!admin "):
+		return strings.TrimSpace(trimmed[len("!admin "):]), true
+	default:
+		return "", false
+	}
+}
+
+func (c *TelegramChannel) sendPlainText(ctx context.Context, chatID int64, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), text))
+	return err
 }
 
 func (c *TelegramChannel) downloadPhoto(ctx context.Context, fileID string) string {

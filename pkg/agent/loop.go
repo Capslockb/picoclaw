@@ -8,11 +8,11 @@ package agent
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -73,6 +73,8 @@ const (
 	metadataKeyTeamID         = "team_id"
 	metadataKeyParentPeerKind = "parent_peer_kind"
 	metadataKeyParentPeerID   = "parent_peer_id"
+	metadataKeyUserProfileKey = "user_profile_key"
+	metadataKeyAdminEscalated = "admin_escalated"
 )
 
 func NewAgentLoop(
@@ -121,118 +123,132 @@ func registerSharedTools(
 		if !ok {
 			continue
 		}
+		registerSharedToolsForAgent(cfg, msgBus, registry, provider, agentID, agent)
+	}
+}
 
-		// Web tools
-		if cfg.Tools.IsToolEnabled("web") {
-			searchTool, err := tools.NewWebSearchTool(tools.WebSearchToolOptions{
-				BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
-				BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
-				BraveEnabled:         cfg.Tools.Web.Brave.Enabled,
-				TavilyAPIKey:         cfg.Tools.Web.Tavily.APIKey,
-				TavilyBaseURL:        cfg.Tools.Web.Tavily.BaseURL,
-				TavilyMaxResults:     cfg.Tools.Web.Tavily.MaxResults,
-				TavilyEnabled:        cfg.Tools.Web.Tavily.Enabled,
-				DuckDuckGoMaxResults: cfg.Tools.Web.DuckDuckGo.MaxResults,
-				DuckDuckGoEnabled:    cfg.Tools.Web.DuckDuckGo.Enabled,
-				PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
-				PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
-				PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
-				SearXNGBaseURL:       cfg.Tools.Web.SearXNG.BaseURL,
-				SearXNGMaxResults:    cfg.Tools.Web.SearXNG.MaxResults,
-				SearXNGEnabled:       cfg.Tools.Web.SearXNG.Enabled,
-				GLMSearchAPIKey:      cfg.Tools.Web.GLMSearch.APIKey,
-				GLMSearchBaseURL:     cfg.Tools.Web.GLMSearch.BaseURL,
-				GLMSearchEngine:      cfg.Tools.Web.GLMSearch.SearchEngine,
-				GLMSearchMaxResults:  cfg.Tools.Web.GLMSearch.MaxResults,
-				GLMSearchEnabled:     cfg.Tools.Web.GLMSearch.Enabled,
-				Proxy:                cfg.Tools.Web.Proxy,
+func registerSharedToolsForAgent(
+	cfg *config.Config,
+	msgBus *bus.MessageBus,
+	registry *AgentRegistry,
+	provider providers.LLMProvider,
+	agentID string,
+	agent *AgentInstance,
+) {
+	if agent == nil {
+		return
+	}
+
+	// Web tools
+	if cfg.Tools.IsToolEnabled("web") {
+		searchTool, err := tools.NewWebSearchTool(tools.WebSearchToolOptions{
+			BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
+			BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
+			BraveEnabled:         cfg.Tools.Web.Brave.Enabled,
+			TavilyAPIKey:         cfg.Tools.Web.Tavily.APIKey,
+			TavilyBaseURL:        cfg.Tools.Web.Tavily.BaseURL,
+			TavilyMaxResults:     cfg.Tools.Web.Tavily.MaxResults,
+			TavilyEnabled:        cfg.Tools.Web.Tavily.Enabled,
+			DuckDuckGoMaxResults: cfg.Tools.Web.DuckDuckGo.MaxResults,
+			DuckDuckGoEnabled:    cfg.Tools.Web.DuckDuckGo.Enabled,
+			PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
+			PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
+			PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
+			SearXNGBaseURL:       cfg.Tools.Web.SearXNG.BaseURL,
+			SearXNGMaxResults:    cfg.Tools.Web.SearXNG.MaxResults,
+			SearXNGEnabled:       cfg.Tools.Web.SearXNG.Enabled,
+			GLMSearchAPIKey:      cfg.Tools.Web.GLMSearch.APIKey,
+			GLMSearchBaseURL:     cfg.Tools.Web.GLMSearch.BaseURL,
+			GLMSearchEngine:      cfg.Tools.Web.GLMSearch.SearchEngine,
+			GLMSearchMaxResults:  cfg.Tools.Web.GLMSearch.MaxResults,
+			GLMSearchEnabled:     cfg.Tools.Web.GLMSearch.Enabled,
+			Proxy:                cfg.Tools.Web.Proxy,
+		})
+		if err != nil {
+			logger.ErrorCF("agent", "Failed to create web search tool", map[string]any{"error": err.Error()})
+		} else if searchTool != nil {
+			agent.Tools.Register(searchTool)
+		}
+	}
+	if cfg.Tools.IsToolEnabled("web_fetch") {
+		fetchTool, err := tools.NewWebFetchToolWithProxy(50000, cfg.Tools.Web.Proxy, cfg.Tools.Web.FetchLimitBytes)
+		if err != nil {
+			logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
+		} else {
+			agent.Tools.Register(fetchTool)
+		}
+	}
+
+	// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
+	if cfg.Tools.IsToolEnabled("i2c") {
+		agent.Tools.Register(tools.NewI2CTool())
+	}
+	if cfg.Tools.IsToolEnabled("spi") {
+		agent.Tools.Register(tools.NewSPITool())
+	}
+
+	// Message tool
+	if cfg.Tools.IsToolEnabled("message") {
+		messageTool := tools.NewMessageTool()
+		messageTool.SetSendCallback(func(channel, chatID, content string) error {
+			pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer pubCancel()
+			return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Content: content,
 			})
-			if err != nil {
-				logger.ErrorCF("agent", "Failed to create web search tool", map[string]any{"error": err.Error()})
-			} else if searchTool != nil {
-				agent.Tools.Register(searchTool)
-			}
-		}
-		if cfg.Tools.IsToolEnabled("web_fetch") {
-			fetchTool, err := tools.NewWebFetchToolWithProxy(50000, cfg.Tools.Web.Proxy, cfg.Tools.Web.FetchLimitBytes)
-			if err != nil {
-				logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
-			} else {
-				agent.Tools.Register(fetchTool)
-			}
-		}
+		})
+		agent.Tools.Register(messageTool)
+	}
 
-		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
-		if cfg.Tools.IsToolEnabled("i2c") {
-			agent.Tools.Register(tools.NewI2CTool())
-		}
-		if cfg.Tools.IsToolEnabled("spi") {
-			agent.Tools.Register(tools.NewSPITool())
-		}
+	// Send file tool (outbound media via MediaStore — store injected later by SetMediaStore)
+	if cfg.Tools.IsToolEnabled("send_file") {
+		sendFileTool := tools.NewSendFileTool(
+			agent.Workspace,
+			cfg.Agents.Defaults.RestrictToWorkspace,
+			cfg.Agents.Defaults.GetMaxMediaSize(),
+			nil,
+		)
+		agent.Tools.Register(sendFileTool)
+	}
 
-		// Message tool
-		if cfg.Tools.IsToolEnabled("message") {
-			messageTool := tools.NewMessageTool()
-			messageTool.SetSendCallback(func(channel, chatID, content string) error {
-				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer pubCancel()
-				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
-					Channel: channel,
-					ChatID:  chatID,
-					Content: content,
-				})
-			})
-			agent.Tools.Register(messageTool)
-		}
+	// Skill discovery and installation tools
+	skillsEnabled := cfg.Tools.IsToolEnabled("skills")
+	findSkillsEnabled := cfg.Tools.IsToolEnabled("find_skills")
+	installSkillsEnabled := cfg.Tools.IsToolEnabled("install_skill")
+	if skillsEnabled && (findSkillsEnabled || installSkillsEnabled) {
+		registryMgr := skills.NewRegistryManagerFromConfig(skills.RegistryConfig{
+			MaxConcurrentSearches: cfg.Tools.Skills.MaxConcurrentSearches,
+			ClawHub:               skills.ClawHubConfig(cfg.Tools.Skills.Registries.ClawHub),
+		})
 
-		// Send file tool (outbound media via MediaStore — store injected later by SetMediaStore)
-		if cfg.Tools.IsToolEnabled("send_file") {
-			sendFileTool := tools.NewSendFileTool(
-				agent.Workspace,
-				cfg.Agents.Defaults.RestrictToWorkspace,
-				cfg.Agents.Defaults.GetMaxMediaSize(),
-				nil,
+		if findSkillsEnabled {
+			searchCache := skills.NewSearchCache(
+				cfg.Tools.Skills.SearchCache.MaxSize,
+				time.Duration(cfg.Tools.Skills.SearchCache.TTLSeconds)*time.Second,
 			)
-			agent.Tools.Register(sendFileTool)
+			agent.Tools.Register(tools.NewFindSkillsTool(registryMgr, searchCache))
 		}
 
-		// Skill discovery and installation tools
-		skills_enabled := cfg.Tools.IsToolEnabled("skills")
-		find_skills_enable := cfg.Tools.IsToolEnabled("find_skills")
-		install_skills_enable := cfg.Tools.IsToolEnabled("install_skill")
-		if skills_enabled && (find_skills_enable || install_skills_enable) {
-			registryMgr := skills.NewRegistryManagerFromConfig(skills.RegistryConfig{
-				MaxConcurrentSearches: cfg.Tools.Skills.MaxConcurrentSearches,
-				ClawHub:               skills.ClawHubConfig(cfg.Tools.Skills.Registries.ClawHub),
+		if installSkillsEnabled {
+			agent.Tools.Register(tools.NewInstallSkillTool(registryMgr, agent.Workspace))
+		}
+	}
+
+	// Spawn tool with allowlist checker
+	if cfg.Tools.IsToolEnabled("spawn") {
+		if cfg.Tools.IsToolEnabled("subagent") {
+			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
+			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+			spawnTool := tools.NewSpawnTool(subagentManager)
+			currentAgentID := agentID
+			spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
+				return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 			})
-
-			if find_skills_enable {
-				searchCache := skills.NewSearchCache(
-					cfg.Tools.Skills.SearchCache.MaxSize,
-					time.Duration(cfg.Tools.Skills.SearchCache.TTLSeconds)*time.Second,
-				)
-				agent.Tools.Register(tools.NewFindSkillsTool(registryMgr, searchCache))
-			}
-
-			if install_skills_enable {
-				agent.Tools.Register(tools.NewInstallSkillTool(registryMgr, agent.Workspace))
-			}
-		}
-
-		// Spawn tool with allowlist checker
-		if cfg.Tools.IsToolEnabled("spawn") {
-			if cfg.Tools.IsToolEnabled("subagent") {
-				subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
-				subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-				spawnTool := tools.NewSpawnTool(subagentManager)
-				currentAgentID := agentID
-				spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
-					return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
-				})
-				agent.Tools.Register(spawnTool)
-			} else {
-				logger.WarnCF("agent", "spawn tool requires subagent to be enabled", nil)
-			}
+			agent.Tools.Register(spawnTool)
+		} else {
+			logger.WarnCF("agent", "spawn tool requires subagent to be enabled", nil)
 		}
 	}
 }
@@ -583,6 +599,9 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	route, agent, routeErr := al.resolveMessageRoute(msg)
+	if routeErr == nil {
+		agent, routeErr = al.resolveEffectiveAgent(msg, route, agent)
+	}
 
 	// Commands are checked before requiring a successful route.
 	// Global commands (/help, /show, /switch) work even when routing fails;
@@ -604,7 +623,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	// Resolve session key from route, while preserving explicit agent-scoped keys.
-	scopeKey := resolveScopeKey(route, msg.SessionKey)
+	scopeKey := resolveScopeKey(route, msg.SessionKey, isAdminEscalation(msg))
 	sessionKey := scopeKey
 
 	logger.InfoCF("agent", "Routed message",
@@ -650,11 +669,77 @@ func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.Resolv
 	return route, agent, nil
 }
 
-func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
+func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string, adminEscalated bool) string {
 	if msgSessionKey != "" && strings.HasPrefix(msgSessionKey, sessionKeyAgentPrefix) {
 		return msgSessionKey
 	}
+	if adminEscalated && route.MainSessionKey != "" {
+		return route.MainSessionKey
+	}
 	return route.SessionKey
+}
+
+func (al *AgentLoop) resolveEffectiveAgent(
+	msg bus.InboundMessage,
+	route routing.ResolvedRoute,
+	baseAgent *AgentInstance,
+) (*AgentInstance, error) {
+	if baseAgent == nil {
+		return nil, fmt.Errorf("no base agent available")
+	}
+	if isAdminEscalation(msg) {
+		return baseAgent, nil
+	}
+
+	profileKey := inboundMetadata(msg, metadataKeyUserProfileKey)
+	if profileKey == "" {
+		profileKey = deriveUserProfileKey(msg)
+	}
+	if profileKey == "" {
+		return baseAgent, nil
+	}
+
+	baseAgentID := baseAgent.ID
+	if baseAgentID == "" {
+		baseAgentID = route.AgentID
+	}
+	profileAgent, created, err := al.registry.GetOrCreateProfileAgent(baseAgentID, profileKey)
+	if err != nil {
+		return nil, err
+	}
+	if created {
+		registerSharedToolsForAgent(al.cfg, al.bus, al.registry, baseAgent.Provider, baseAgentID, profileAgent)
+		if al.mediaStore != nil {
+			if tool, ok := profileAgent.Tools.Get("send_file"); ok {
+				if sendFileTool, ok := tool.(*tools.SendFileTool); ok {
+					sendFileTool.SetMediaStore(al.mediaStore)
+				}
+			}
+		}
+		logger.InfoCF("agent", "Created isolated profile agent", map[string]any{
+			"agent_id":       baseAgentID,
+			"profile_key":    profileKey,
+			"profile_folder": profileAgent.Workspace,
+		})
+	}
+	return profileAgent, nil
+}
+
+func isAdminEscalation(msg bus.InboundMessage) bool {
+	return strings.EqualFold(strings.TrimSpace(inboundMetadata(msg, metadataKeyAdminEscalated)), "true")
+}
+
+func deriveUserProfileKey(msg bus.InboundMessage) string {
+	if msg.Sender.CanonicalID != "" {
+		return msg.Sender.CanonicalID
+	}
+	if msg.Sender.Platform != "" && msg.Sender.PlatformID != "" {
+		return fmt.Sprintf("%s:%s", msg.Sender.Platform, msg.Sender.PlatformID)
+	}
+	if msg.Channel != "" && inboundMetadata(msg, "user_id") != "" {
+		return fmt.Sprintf("%s:%s", msg.Channel, inboundMetadata(msg, "user_id"))
+	}
+	return ""
 }
 
 func (al *AgentLoop) processSystemMessage(
