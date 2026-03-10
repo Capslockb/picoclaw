@@ -664,8 +664,29 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		SendResponse:    false,
 	}
 
-	// context-dependent commands check their own Runtime fields and report
-	// "unavailable" when the required capability is nil.
+	// Check for pending authorization response
+	if isYesResponse(msg.Content) {
+		if pending, _ := agent.Sessions.GetMetadata(opts.SessionKey, "pending_paid_auth"); pending == true {
+			agent.Sessions.SetMetadata(opts.SessionKey, "paid_model_authorized", true)
+			agent.Sessions.SetMetadata(opts.SessionKey, "pending_paid_auth", false)
+
+			// Retrieve the stashed message to resume
+			if stashed, ok := agent.Sessions.GetMetadata(opts.SessionKey, "stashed_user_message"); ok {
+				opts.UserMessage = stashed.(string)
+				// Clear stash
+				agent.Sessions.SetMetadata(opts.SessionKey, "stashed_user_message", nil)
+
+				al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+					Channel: msg.Channel,
+					ChatID:  msg.ChatID,
+					Content: "✅ Authorized! Processing your request with the advanced model now...",
+				})
+			} else {
+				return "✅ Authorized! DeepSeek and other paid models are now enabled for this session. What would you like me to do?", nil
+			}
+		}
+	}
+
 	if response, handled := al.handleCommand(ctx, msg, agent, &opts); handled {
 		return response, nil
 	}
@@ -925,6 +946,20 @@ func (al *AgentLoop) runLLMIteration(
 	// all tool-follow-up iterations within the same turn so that a multi-step
 	// tool chain doesn't switch models mid-way through.
 	activeCandidates, activeModel := al.selectCandidates(agent, opts.UserMessage, messages)
+
+	// Check for paid model authorization
+	if isPaidModel(activeModel) {
+		authorized, _ := agent.Sessions.GetMetadata(opts.SessionKey, "paid_model_authorized")
+		if authorized != true {
+			// Stash the message and ask for permission
+			agent.Sessions.SetMetadata(opts.SessionKey, "pending_paid_auth", true)
+			agent.Sessions.SetMetadata(opts.SessionKey, "stashed_user_message", opts.UserMessage)
+			agent.Sessions.Save(opts.SessionKey)
+
+			authMsg := fmt.Sprintf("🛡️ **Authorization Required**\n\nI've detected this task requires an advanced model (%s) which may incur costs. \n\nReply with **'yes'** or **'y'** to authorize this session, or I can continue with the free model if you prefer.", activeModel)
+			return authMsg, 0, nil
+		}
+	}
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -1864,4 +1899,23 @@ func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 		return nil
 	}
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
+}
+
+func isPaidModel(model string) bool {
+	m := strings.ToLower(model)
+	// Explicitly free models
+	if strings.Contains(m, "/free") || strings.HasPrefix(m, "ollama/") || strings.HasPrefix(m, "vllm/") {
+		return false
+	}
+	// Models on OpenRouter that are free or we want to treat as free
+	if strings.HasPrefix(m, "openrouter/free") {
+		return false
+	}
+	// Everything else (DeepSeek, Claude, GPT-4, etc.) is considered paid
+	return true
+}
+
+func isYesResponse(content string) bool {
+	c := strings.ToLower(strings.TrimSpace(content))
+	return c == "yes" || c == "y" || c == "ok" || c == "confirm" || c == "proceed"
 }

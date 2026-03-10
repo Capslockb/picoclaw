@@ -15,6 +15,7 @@ type Session struct {
 	Key      string              `json:"key"`
 	Messages []providers.Message `json:"messages"`
 	Summary  string              `json:"summary,omitempty"`
+	Metadata map[string]any      `json:"metadata,omitempty"`
 	Created  time.Time           `json:"created"`
 	Updated  time.Time           `json:"updated"`
 }
@@ -143,6 +144,41 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
+}
+
+func (sm *SessionManager) SetMetadata(key string, metaKey string, value any) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Metadata: make(map[string]any),
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]any)
+	}
+	session.Metadata[metaKey] = value
+	session.Updated = time.Now()
+}
+
+func (sm *SessionManager) GetMetadata(key string, metaKey string) (any, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || session.Metadata == nil {
+		return nil, false
+	}
+
+	val, ok := session.Metadata[metaKey]
+	return val, ok
 }
 
 // sanitizeFilename converts a session key into a cross-platform safe filename.

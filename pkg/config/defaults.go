@@ -29,7 +29,8 @@ func DefaultConfig() *Config {
 				Workspace:                 workspacePath,
 				RestrictToWorkspace:       true,
 				Provider:                  "",
-				Model:                     "",
+				ModelName:                 "openrouter-free",
+				Model:                     "openrouter/free",
 				MaxTokens:                 32768,
 				Temperature:               nil, // nil means use provider default
 				MaxToolIterations:         10,
@@ -248,6 +249,12 @@ func DefaultConfig() *Config {
 			},
 
 			// OpenRouter (100+ models) - https://openrouter.ai/keys
+			{
+				ModelName: "openrouter-free",
+				Model:     "openrouter/free",
+				APIBase:   "https://openrouter.ai/api/v1",
+				APIKey:    "",
+			},
 			{
 				ModelName: "openrouter-auto",
 				Model:     "openrouter/auto",
