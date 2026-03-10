@@ -79,9 +79,6 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("list_dir") {
 		toolsRegistry.Register(tools.NewListDirTool(workspace, readRestrict, allowReadPaths))
 	}
-	if cfg.Tools.IsToolEnabled("google") {
-		toolsRegistry.Register(&tools.GoogleTool{})
-	}
 	if cfg.Tools.IsToolEnabled("exec") {
 		execTool, err := tools.NewExecToolWithConfig(workspace, restrict, cfg)
 		if err != nil {
@@ -105,6 +102,15 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("append_file") {
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
+	if cfg.Tools.IsToolEnabled("pdf") {
+		toolsRegistry.Register(tools.NewPDFTool(workspace, restrict, cfg.MediaStore))
+	}
+	if cfg.Tools.IsToolEnabled("browser") {
+		toolsRegistry.Register(tools.NewBrowserTool(workspace, cfg.MediaStore))
+	}
+	if cfg.Tools.IsToolEnabled("image") {
+		toolsRegistry.Register(tools.NewImageTool(workspace, cfg.MediaStore))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
@@ -113,7 +119,7 @@ func NewAgentInstance(
 	contextBuilder := NewContextBuilder(workspace).WithToolDiscovery(
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
-	)
+	).WithInteraction(cfg.Tools.Interaction.WritingStyle, cfg.Tools.Interaction.AutoReplyEnabled)
 
 	agentID := routing.DefaultAgentID
 	agentName := ""

@@ -30,6 +30,9 @@ require (
 	google.golang.org/protobuf v1.36.11
 	maunium.net/go/mautrix v0.26.3
 	modernc.org/sqlite v1.46.1
+	github.com/jung-kurt/gofpdf/v2 v2.17.2
+	github.com/chromedp/chromedp v0.10.0
+	github.com/disintegration/imaging v1.6.2
 )
 
 require (

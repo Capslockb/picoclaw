@@ -2,6 +2,9 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 )
 
 func helpCommand() Definition {
@@ -21,42 +24,28 @@ func helpCommand() Definition {
 	}
 }
 
-func formatHelpMessage(_ []Definition) string {
-	return `System:
-  /help             Show this help
-  /model [name]     Show or switch the active model
-  /version          Show version info
-  /tools            List available tools
-  /debug            Toggle debug mode
-  /ping             Connectivity check
-  /vps login <pw>   Set VPS password securely
-  /whatsapp qr      Get WhatsApp pairing QR code
-  /acp <cmd> <args> Manage active ACP harness sessions
+func formatHelpMessage(defs []Definition) string {
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
 
-Jobs:
-  /job <desc>       Create a new job
-  /status <id>      Check job status
-  /cancel <id>      Cancel a job
-  /list             List all jobs
+	var sb strings.Builder
+	sb.WriteString("🦞 *PicoClaw Commands*\n\n")
 
-Session:
-  /undo             Undo last turn
-  /redo             Redo undone turn
-  /compact          Compress context window
-  /clear            Clear current thread
-  /interrupt        Stop current operation
-  /new              New conversation thread
-  /thread <id>      Switch to thread
-  /resume <id>      Resume from checkpoint
+	for _, d := range defs {
+		// Skip legacy stub commands
+		if strings.HasPrefix(d.Description, "Alias:") {
+			continue
+		}
 
-Skills:
-  /skills             List installed skills
-  /skills search <q>  Search ClawHub registry
+		usage := d.Usage
+		if usage == "" {
+			usage = "/" + d.Name
+		}
+		sb.WriteString(fmt.Sprintf("• `%s` — %s\n", usage, d.Description))
+	}
 
-Agent:
-  /heartbeat        Run heartbeat check
-  /summarize        Summarize current thread
-  /suggest          Suggest next steps
-
-  /quit             Exit`
+	sb.WriteString("\n• `<shell command>` — Run a shell command (if exec tool enabled)\n")
+	sb.WriteString("\nTip: All commands are single-word, e.g. `/model gpt-4o`")
+	return sb.String()
 }

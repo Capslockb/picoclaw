@@ -497,6 +497,15 @@ func DefaultConfig() *Config {
 			Message: ToolConfig{
 				Enabled: true,
 			},
+			PDF: ToolConfig{
+				Enabled: true,
+			},
+			Browser: ToolConfig{
+				Enabled: false, // Requires Chrome/Chromium installed
+			},
+			Image: ToolConfig{
+				Enabled: true,
+			},
 			ReadFile: ReadFileToolConfig{
 				Enabled:         true,
 				MaxReadFileSize: 64 * 1024, // 64KB
@@ -520,6 +529,19 @@ func DefaultConfig() *Config {
 			},
 			WriteFile: ToolConfig{
 				Enabled: true,
+			},
+			Proactive: ProactiveConfig{
+				Enabled:                true,
+				SyncIntervalMinutes:    60,
+				ProcessIntervalMinutes: 120,
+			},
+			ElevenLabs: ElevenLabsConfig{
+				Enabled: false,
+			},
+			Interaction: InteractionConfig{
+				WritingStyle:     "Casual and helpful",
+				AutoReplyEnabled: false,
+				ApprovalRequired: true,
 			},
 		},
 		Heartbeat: HeartbeatConfig{

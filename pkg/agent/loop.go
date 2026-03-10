@@ -8,9 +8,11 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -26,6 +29,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/commands"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/constants"
+	"github.com/sipeed/picoclaw/pkg/health"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/mcp"
 	"github.com/sipeed/picoclaw/pkg/media"
@@ -48,11 +52,13 @@ type AgentLoop struct {
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
 	mediaStore     media.MediaStore
-	transcriber    voice.Transcriber
-	cmdRegistry    *commands.Registry
-	version        string
-	sf             singleflight.Group
-	wg             sync.WaitGroup
+	transcriber     voice.Transcriber
+	cmdRegistry     *commands.Registry
+	proactiveService *ProactiveService
+	synthesizers    map[string]voice.Synthesizer
+	version         string
+	sf              singleflight.Group
+	wg              sync.WaitGroup
 }
 
 // processOptions configures how a message is processed
@@ -66,6 +72,7 @@ type processOptions struct {
 	EnableSummary   bool     // Whether to trigger summarization
 	SendResponse    bool     // Whether to send response via bus
 	NoHistory       bool     // If true, don't load session history (for heartbeat)
+	SenderID        string   // From inbound message (e.g., "cron")
 }
 
 const (
@@ -205,6 +212,18 @@ func registerSharedTools(
 		skills_enabled := cfg.Tools.IsToolEnabled("skills")
 		find_skills_enable := cfg.Tools.IsToolEnabled("find_skills")
 		install_skills_enable := cfg.Tools.IsToolEnabled("install_skill")
+
+		// WhatsApp and Google tools (shared across agents)
+		if cfg.Channels.WhatsApp.Enabled {
+			agent.Tools.Register(tools.NewWhatsAppTool(al))
+		}
+		if cfg.Tools.IsToolEnabled("google") {
+			agent.Tools.Register(tools.NewGoogleTool(al))
+		}
+		if cfg.Tools.IsToolEnabled("speech") || cfg.Tools.ElevenLabs.Enabled {
+			agent.Tools.Register(tools.NewSpeechTool(al))
+		}
+
 		if skills_enabled && (find_skills_enable || install_skills_enable) {
 			registryMgr := skills.NewRegistryManagerFromConfig(skills.RegistryConfig{
 				MaxConcurrentSearches: cfg.Tools.Skills.MaxConcurrentSearches,
@@ -217,6 +236,7 @@ func registerSharedTools(
 					time.Duration(cfg.Tools.Skills.SearchCache.TTLSeconds)*time.Second,
 				)
 				agent.Tools.Register(tools.NewFindSkillsTool(registryMgr, searchCache))
+				agent.Tools.Register(tools.NewInspectSkillTool(registryMgr))
 			}
 
 			if install_skills_enable {
@@ -450,6 +470,52 @@ func (al *AgentLoop) SetChannelManager(cm *channels.Manager) {
 	al.channelManager = cm
 }
 
+func (al *AgentLoop) GetChannel(name string) (any, bool) {
+	if al.channelManager == nil {
+		return nil, false
+	}
+	return al.channelManager.GetChannel(name)
+}
+
+func (al *AgentLoop) GetMemoryStore() any {
+	return al.memory
+}
+
+func (al *AgentLoop) SetProactiveService(ps *ProactiveService) {
+	al.proactiveService = ps
+}
+
+func (al *AgentLoop) AddSynthesizer(s voice.Synthesizer) {
+	if al.synthesizers == nil {
+		al.synthesizers = make(map[string]voice.Synthesizer)
+	}
+	al.synthesizers[s.Name()] = s
+}
+
+func (al *AgentLoop) GetSynthesizer(name string) (any, bool) {
+	if name == "" {
+		// Return first available as default
+		for _, s := range al.synthesizers {
+			return s, true
+		}
+		return nil, false
+	}
+	s, ok := al.synthesizers[name]
+	return s, ok
+}
+
+func (al *AgentLoop) GetMediaStore() media.MediaStore {
+	return al.mediaStore
+}
+
+func (al *AgentLoop) GetWorkspace() string {
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent != nil && defaultAgent.Workspace != "" {
+		return defaultAgent.Workspace
+	}
+	return al.cfg.WorkspacePath()
+}
+
 // SetMediaStore injects a MediaStore for media lifecycle management.
 func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 	al.mediaStore = s
@@ -673,6 +739,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		DefaultResponse: defaultResponse,
 		EnableSummary:   true,
 		SendResponse:    false,
+		SenderID:        msg.SenderID,
 	}
 
 	// Check for pending authorization response
@@ -1027,6 +1094,8 @@ func (al *AgentLoop) runLLMIteration(
 			}
 		}
 
+		messages = al.resolveMediaReferences(messages)
+ 
 		callLLM := func() (*providers.LLMResponse, error) {
 			if len(activeCandidates) > 1 && al.fallback != nil {
 				fbResult, fbErr := al.fallback.Execute(
@@ -1155,6 +1224,13 @@ func (al *AgentLoop) runLLMIteration(
 
 		// Telemetry: Log iteration performance
 		duration := time.Since(iterStart)
+		health.DefaultMetrics.RecordLatency("llm_duration_"+activeModel, duration.Milliseconds())
+		if response.Usage != nil {
+			health.DefaultMetrics.RecordCounter("tokens_prompt", int64(response.Usage.PromptTokens))
+			health.DefaultMetrics.RecordCounter("tokens_completion", int64(response.Usage.CompletionTokens))
+			health.DefaultMetrics.RecordCounter("tokens_total", int64(response.Usage.TotalTokens))
+		}
+
 		logger.InfoCF("agent", "Iteration performance", map[string]any{
 			"agent_id":     agent.ID,
 			"model":        activeModel,
@@ -1228,38 +1304,51 @@ func (al *AgentLoop) runLLMIteration(
 		// Save assistant message with tool calls to session
 		agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
-		// Execute tool calls in parallel
+		// Execute tool calls in parallel using errgroup for structured concurrency.
+		g, gCtx := errgroup.WithContext(ctx)
 		type indexedAgentResult struct {
 			result *tools.ToolResult
 			tc     providers.ToolCall
 		}
 
 		agentResults := make([]indexedAgentResult, len(normalizedToolCalls))
-		var wg sync.WaitGroup
+
+		// Check for approval gating if it's a proactive turn
+		approvalRequired := al.cfg.Tools.Interaction.ApprovalRequired
+		isProactive := (opts.SenderID == "cron")
 
 		for i, tc := range normalizedToolCalls {
-			agentResults[i].tc = tc
+			idx, toolCall := i, tc
+			agentResults[idx].tc = toolCall
 
-			wg.Add(1)
-			go func(idx int, tc providers.ToolCall) {
-				defer wg.Done()
+			// If it's a proactive turn and approval is required, intercept tool call.
+			// We only block tools that are NOT read-only.
+			// For simplicity here, we'll block everything that isn't explicitly safe
+			// if the user requested "never go off without explicit request".
+			if isProactive && approvalRequired {
+				logger.InfoCF("agent", "Intercepting tool call for approval",
+					map[string]any{"tool": toolCall.Name, "agent_id": agent.ID})
+				agentResults[idx].result = &tools.ToolResult{
+					Silent: false,
+					ForUser: fmt.Sprintf("⚠️ I need your approval to execute: %s(%v). Should I proceed?",
+						toolCall.Name, toolCall.Arguments),
+					ForLLM: "INTERCEPTED: Execution requires explicit user approval in chat. Propose this action to the user instead of executing it.",
+				}
+				continue
+			}
 
-				argsJSON, _ := json.Marshal(tc.Arguments)
+			g.Go(func() error {
+				argsJSON, _ := json.Marshal(toolCall.Arguments)
 				argsPreview := utils.Truncate(string(argsJSON), 200)
-				logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
+				logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", toolCall.Name, argsPreview),
 					map[string]any{
 						"agent_id":  agent.ID,
-						"tool":      tc.Name,
+						"tool":      toolCall.Name,
 						"iteration": iteration,
 					})
 
 				// Create async callback for tools that implement AsyncExecutor.
-				// When the background work completes, this publishes the result
-				// as an inbound system message so processSystemMessage routes it
-				// back to the user via the normal agent loop.
 				asyncCallback := func(_ context.Context, result *tools.ToolResult) {
-					// Send ForUser content directly to the user (immediate feedback),
-					// mirroring the synchronous tool execution path.
 					if !result.Silent && result.ForUser != "" {
 						outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
 						defer outCancel()
@@ -1270,7 +1359,6 @@ func (al *AgentLoop) runLLMIteration(
 						})
 					}
 
-					// Determine content for the agent loop (ForLLM or error).
 					content := result.ForLLM
 					if content == "" && result.Err != nil {
 						content = result.Err.Error()
@@ -1281,7 +1369,7 @@ func (al *AgentLoop) runLLMIteration(
 
 					logger.InfoCF("agent", "Async tool completed, publishing result",
 						map[string]any{
-							"tool":        tc.Name,
+							"tool":        toolCall.Name,
 							"content_len": len(content),
 							"channel":     opts.Channel,
 						})
@@ -1290,24 +1378,32 @@ func (al *AgentLoop) runLLMIteration(
 					defer pubCancel()
 					_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
 						Channel:  "system",
-						SenderID: fmt.Sprintf("async:%s", tc.Name),
+						SenderID: fmt.Sprintf("async:%s", toolCall.Name),
 						ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
 						Content:  content,
 					})
 				}
 
 				toolResult := agent.Tools.ExecuteWithContext(
-					ctx,
-					tc.Name,
-					tc.Arguments,
+					gCtx,
+					toolCall.Name,
+					toolCall.Arguments,
 					opts.Channel,
 					opts.ChatID,
 					asyncCallback,
 				)
+				if toolResult.Err != nil {
+					health.DefaultMetrics.RecordCounter("tool_failure_"+toolCall.Name, 1)
+				} else {
+					health.DefaultMetrics.RecordCounter("tool_success_"+toolCall.Name, 1)
+				}
 				agentResults[idx].result = toolResult
-			}(i, tc)
+				return nil // We don't want a tool error to cancel other tools unless it's a panic/critical
+			})
 		}
-		wg.Wait()
+		if err := g.Wait(); err != nil {
+			return "", iteration, fmt.Errorf("tool execution phase failed: %w", err)
+		}
 
 		// Process results in original order (send to user, save to session)
 		for _, r := range agentResults {
@@ -1961,4 +2057,46 @@ func isPaidModel(model string) bool {
 func isYesResponse(content string) bool {
 	c := strings.ToLower(strings.TrimSpace(content))
 	return c == "yes" || c == "y" || c == "ok" || c == "confirm" || c == "proceed"
+}
+
+func (al *AgentLoop) resolveMediaReferences(messages []providers.Message) []providers.Message {
+	if al.mediaStore == nil {
+		return messages
+	}
+
+	result := make([]providers.Message, len(messages))
+	copy(result, messages)
+
+	for i, msg := range result {
+		if len(msg.Media) == 0 {
+			continue
+		}
+
+		resolvedMedia := make([]string, 0, len(msg.Media))
+		for _, m := range msg.Media {
+			if !strings.HasPrefix(m, "media://") {
+				resolvedMedia = append(resolvedMedia, m)
+				continue
+			}
+
+			localPath, meta, err := al.mediaStore.ResolveWithMeta(m)
+			if err != nil {
+				logger.WarnCF("agent", "Failed to resolve media reference", map[string]any{"ref": m, "error": err.Error()})
+				continue
+			}
+
+			data, err := os.ReadFile(localPath)
+			if err != nil {
+				logger.WarnCF("agent", "Failed to read media file", map[string]any{"path": localPath, "error": err.Error()})
+				continue
+			}
+
+			base64Data := base64.StdEncoding.EncodeToString(data)
+			dataURI := fmt.Sprintf("data:%s;base64,%s", meta.ContentType, base64Data)
+			resolvedMedia = append(resolvedMedia, dataURI)
+		}
+		result[i].Media = resolvedMedia
+	}
+
+	return result
 }

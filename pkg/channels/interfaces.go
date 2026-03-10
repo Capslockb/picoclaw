@@ -56,3 +56,8 @@ type CommandRegistrarCapable interface {
 type QRProvider interface {
 	GetLastQR() string
 }
+
+// HistoryProvider is implemented by channels that can fetch message history.
+type HistoryProvider interface {
+	FetchHistory(ctx context.Context, chatID string, limit int) ([]bus.InboundMessage, error)
+}

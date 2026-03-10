@@ -11,6 +11,12 @@ import (
 // ErrBusClosed is returned when publishing to a closed MessageBus.
 var ErrBusClosed = errors.New("message bus closed")
 
+// InboundMiddleware is a function that can transform an inbound message.
+type InboundMiddleware func(InboundMessage) InboundMessage
+
+// OutboundMiddleware is a function that can transform an outbound message.
+type OutboundMiddleware func(OutboundMessage) OutboundMessage
+
 const defaultBusBufferSize = 64
 
 type MessageBus struct {
@@ -19,6 +25,9 @@ type MessageBus struct {
 	outboundMedia chan OutboundMediaMessage
 	done          chan struct{}
 	closed        atomic.Bool
+
+	inboundMiddleware  []InboundMiddleware
+	outboundMiddleware []OutboundMiddleware
 }
 
 func NewMessageBus() *MessageBus {
@@ -37,8 +46,15 @@ func (mb *MessageBus) PublishInbound(ctx context.Context, msg InboundMessage) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	// Apply middleware
+	processed := msg
+	for _, mw := range mb.inboundMiddleware {
+		processed = mw(processed)
+	}
+
 	select {
-	case mb.inbound <- msg:
+	case mb.inbound <- processed:
 		return nil
 	case <-mb.done:
 		return ErrBusClosed
@@ -65,8 +81,15 @@ func (mb *MessageBus) PublishOutbound(ctx context.Context, msg OutboundMessage) 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	// Apply middleware
+	processed := msg
+	for _, mw := range mb.outboundMiddleware {
+		processed = mw(processed)
+	}
+
 	select {
-	case mb.outbound <- msg:
+	case mb.outbound <- processed:
 		return nil
 	case <-mb.done:
 		return ErrBusClosed
@@ -112,6 +135,17 @@ func (mb *MessageBus) SubscribeOutboundMedia(ctx context.Context) (OutboundMedia
 	case <-ctx.Done():
 		return OutboundMediaMessage{}, false
 	}
+}
+
+	}
+}
+
+func (mb *MessageBus) RegisterInboundMiddleware(mw InboundMiddleware) {
+	mb.inboundMiddleware = append(mb.inboundMiddleware, mw)
+}
+
+func (mb *MessageBus) RegisterOutboundMiddleware(mw OutboundMiddleware) {
+	mb.outboundMiddleware = append(mb.outboundMiddleware, mw)
 }
 
 func (mb *MessageBus) Close() {

@@ -54,8 +54,9 @@ func SplitMessage(content string, maxLen int) []string {
 			msgEnd = end
 		}
 
-		// Check if this would end with an incomplete code block
+		// Check if this would end with an incomplete code block or in the middle of a table
 		unclosedIdx := findLastUnclosedCodeBlockInRange(runes, start, msgEnd)
+		inTable := isInsideTableInRange(runes, start, msgEnd)
 
 		if unclosedIdx >= 0 {
 			// Message would end with incomplete code block
@@ -124,6 +125,18 @@ func SplitMessage(content string, maxLen int) []string {
 							continue
 						}
 					}
+				}
+			}
+		} else if inTable {
+			// Try to find the end of the table
+			tableEnd := findTableEndFrom(runes, msgEnd, totalLen)
+			if tableEnd > 0 && tableEnd-start <= maxLen {
+				msgEnd = tableEnd
+			} else {
+				// Table is too long, split before it if possible
+				tableStart := findTableStartBefore(runes, msgEnd, start)
+				if tableStart > start {
+					msgEnd = tableStart
 				}
 			}
 		}
@@ -223,3 +236,58 @@ func findLastDoubleNewlineInRange(runes []rune, start, end, searchWindow int) in
 	return start - 1
 }
 
+// isInsideTableInRange checks if the msgEnd point falls within a Markdown table.
+func isInsideTableInRange(runes []rune, start, msgEnd int) bool {
+	// Simple heuristic: if the line at msgEnd and the line before it both start with |
+	lineStart := findLineStartBefore(runes, msgEnd)
+	if lineStart < start {
+		return false
+	}
+	return runes[lineStart] == '|'
+}
+
+func findLineStartBefore(runes []rune, idx int) int {
+	for i := idx - 1; i >= 0; i-- {
+		if runes[i] == '\n' {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func findTableEndFrom(runes []rune, from, totalLen int) int {
+	// Look for the first line that doesn't start with |
+	curr := from
+	for curr < totalLen {
+		eol := findNewlineFrom(runes, curr)
+		if eol == -1 {
+			eol = totalLen
+		}
+		// Skip leading whitespace to find the start of the next line
+		nextStart := eol
+		for nextStart < totalLen && (runes[nextStart] == '\n' || runes[nextStart] == '\r') {
+			nextStart++
+		}
+		if nextStart >= totalLen || runes[nextStart] != '|' {
+			return eol
+		}
+		curr = nextStart
+	}
+	return totalLen
+}
+
+func findTableStartBefore(runes []rune, before, start int) int {
+	// Look for the first line that doesn't start with | backwards
+	curr := before
+	for curr > start {
+		sol := findLineStartBefore(runes, curr)
+		if sol < start {
+			return start
+		}
+		if runes[sol] != '|' {
+			return curr // The newline before a table row
+		}
+		curr = sol - 1
+	}
+	return start
+}

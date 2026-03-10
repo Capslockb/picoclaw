@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -33,42 +34,50 @@ func (al *AgentLoop) selectRelevantTools(agent *AgentInstance, userMsg string) [
 		"spawn":       {"spawn", "acp", "harness", "agent", "protocol"},
 	}
 
-	relevant := make([]providers.ToolDefinition, 0)
+	type ScoredTool struct {
+		tool  providers.ToolDefinition
+		score int
+	}
+
+	scored := make([]ScoredTool, 0, len(allTools))
 	for _, tool := range allTools {
 		name := tool.Function.Name
-		
-		// 1. Always include essential tools.
+		score := 0
+
+		// 1. Always include essential tools (high score).
 		if essentialTools[name] {
-			relevant = append(relevant, tool)
-			continue
+			score += 100
 		}
 
-		// 2. Include based on keywords.
+		// 2. Score based on keywords.
 		if kws, ok := toolKeywords[name]; ok {
-			matched := false
 			for _, kw := range kws {
 				if strings.Contains(lowerMsg, kw) {
-					matched = true
-					break
+					score += 10
 				}
-			}
-			if matched {
-				relevant = append(relevant, tool)
-				continue
 			}
 		}
 
-		// 3. Fallback: if tool has no keywords defined, include it by default?
-		// To be safe and avoid context bloat, we only include tools with defined keywords if they match.
-		// If a tool is NOT in our map, we'll include it for now to avoid breaking unknown tools.
+		// 3. Fallback: if tool has no keywords defined, give it a base score to avoid starving unknown tools.
 		if _, ok := toolKeywords[name]; !ok {
-			relevant = append(relevant, tool)
+			score += 5
+		}
+
+		if score > 0 {
+			scored = append(scored, ScoredTool{tool: tool, score: score})
 		}
 	}
 
-	// Safety: ensure we don't return an empty tool set if any were available.
-	if len(relevant) == 0 && len(allTools) > 0 {
-		return allTools[:min(len(allTools), 5)]
+	// Sort by score descending
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Take Top-K (up to 12 tools for a good balance of capability and context)
+	topK := 12
+	relevant := make([]providers.ToolDefinition, 0, min(len(scored), topK))
+	for i := 0; i < min(len(scored), topK); i++ {
+		relevant = append(relevant, scored[i].tool)
 	}
 
 	return relevant

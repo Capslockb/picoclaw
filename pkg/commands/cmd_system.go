@@ -84,29 +84,33 @@ func modelCommand() Definition {
 func vpsCommand() Definition {
 	return Definition{
 		Name:        "vps",
-		Description: "Configure VPS credentials",
-		Usage:       "/vps login <password>",
-		SubCommands: []SubCommand{
-			{
-				Name:        "login",
-				Description: "Set VPS password securely",
-				ArgsUsage:   "<password>",
-				Handler: func(_ context.Context, req Request, _ *Runtime) error {
-					password := nthToken(req.Text, 2)
-					if password == "" {
-						return req.Reply("Usage: /vps login <password>")
-					}
-					cred := &auth.AuthCredential{
-						AccessToken: password,
-						Provider:    "vps",
-						AuthMethod:  "password",
-					}
-					if err := auth.SetCredential("vps", cred); err != nil {
-						return req.Reply(fmt.Sprintf("Failed to save VPS credentials: %v", err))
-					}
-					return req.Reply("VPS credentials saved securely.")
-				},
-			},
+		Description: "Alias: use /vpslogin <password>",
+		Usage:       "/vps",
+		Handler: func(_ context.Context, req Request, _ *Runtime) error {
+			return req.Reply("Use /vpslogin <password> to set VPS credentials.")
+		},
+	}
+}
+
+func vpsloginCommand() Definition {
+	return Definition{
+		Name:        "vpslogin",
+		Description: "Set VPS password securely",
+		Usage:       "/vpslogin <password>",
+		Handler: func(_ context.Context, req Request, _ *Runtime) error {
+			password := nthToken(req.Text, 1)
+			if password == "" {
+				return req.Reply("Usage: /vpslogin <password>")
+			}
+			cred := &auth.AuthCredential{
+				AccessToken: password,
+				Provider:    "vps",
+				AuthMethod:  "password",
+			}
+			if err := auth.SetCredential("vps", cred); err != nil {
+				return req.Reply(fmt.Sprintf("Failed to save VPS credentials: %v", err))
+			}
+			return req.Reply("VPS credentials saved securely.")
 		},
 	}
 }

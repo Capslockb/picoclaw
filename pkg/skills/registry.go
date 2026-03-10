@@ -33,6 +33,25 @@ type SkillMeta struct {
 	RegistryName     string `json:"registry_name"`
 }
 
+// SkillDetails provides in-depth information about a skill for trust/safety inspection.
+type SkillDetails struct {
+	Slug             string   `json:"slug"`
+	DisplayName      string   `json:"display_name"`
+	Summary          string   `json:"summary"`
+	Description      string   `json:"description"`
+	Version          string   `json:"version"`
+	Author           string   `json:"author"`
+	Homepage         string   `json:"homepage"`
+	Repository       string   `json:"repository"`
+	License          string   `json:"license"`
+	IsMalwareBlocked bool     `json:"is_malware_blocked"`
+	IsSuspicious     bool     `json:"is_suspicious"`
+	Files            []string `json:"files"`            // List of files in the skill
+	Tools            []string `json:"tools"`            // List of tools/commands provided
+	Permissions      []string `json:"permissions"`      // Required permissions
+	RegistryName     string   `json:"registry_name"`
+}
+
 // InstallResult is returned by DownloadAndInstall to carry metadata
 // back to the caller for moderation and user messaging.
 type InstallResult struct {
@@ -55,6 +74,8 @@ type SkillRegistry interface {
 	// installs the skill to targetDir. Returns an InstallResult with metadata
 	// for the caller to use for moderation and user messaging.
 	DownloadAndInstall(ctx context.Context, slug, version, targetDir string) (*InstallResult, error)
+	// Inspect retrieves detailed information about a skill for safety review.
+	Inspect(ctx context.Context, slug string) (*SkillDetails, error)
 }
 
 // RegistryConfig holds configuration for all skill registries.

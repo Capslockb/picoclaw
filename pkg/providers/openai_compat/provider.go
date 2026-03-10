@@ -406,6 +406,21 @@ func serializeMessages(messages []Message) []any {
 						"url": mediaURL,
 					},
 				})
+			} else if strings.HasPrefix(mediaURL, "data:application/pdf") {
+				parts = append(parts, map[string]any{
+					"type": "file_url",
+					"file_url": map[string]any{
+						"url": mediaURL,
+					},
+				})
+			} else if strings.HasPrefix(mediaURL, "data:") {
+				// Fallback for other media types (e.g. audio, video)
+				parts = append(parts, map[string]any{
+					"type": "file_url",
+					"file_url": map[string]any{
+						"url": mediaURL,
+					},
+				})
 			}
 		}
 

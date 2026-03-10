@@ -19,6 +19,7 @@ type SubagentTask struct {
 	Status        string
 	Result        string
 	Created       int64
+	Type          string // "default", "web_dev", "ui_designer", "researcher"
 }
 
 type SubagentManager struct {
@@ -112,10 +113,28 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Status = "running"
 	task.Created = time.Now().UnixMilli()
 
-	// Build system prompt for subagent
-	systemPrompt := `You are a subagent. Complete the given task independently and report the result.
-You have access to tools - use them as needed to complete your task.
-After completing the task, provide a clear summary of what was done.`
+	// Build system prompt for subagent based on type
+	systemPrompt := "You are a subagent. Complete the given task independently and report the result."
+	
+	switch task.Type {
+	case "web_dev":
+		systemPrompt = `You are a specialized Web Development subagent. 
+Your goal is to build, debug, or improve web applications (HTML/CSS/JS).
+You have access to a browser tool - use it to verify your work and take screenshots for the user.
+Focus on clean code, responsiveness, and functional correctness.`
+	case "ui_designer":
+		systemPrompt = `You are a specialized UI/UX Design subagent.
+Focus on aesthetics, layout, color theory, and user experience.
+Use the browser and image tools to inspect designs and provide visual feedback or mockups.
+Your goal is to make things look premium, modern, and high-quality.`
+	case "researcher":
+		systemPrompt = `You are a specialized Research subagent.
+Your goal is to find deep, accurate, and synthesized information on the web.
+Use search tools extensively and cross-reference multiple sources.
+Provide detailed summaries with citations.`
+	}
+
+	systemPrompt += "\nYou have access to tools - use them as needed to complete your task.\nAfter completing the task, provide a clear summary of what was done."
 
 	messages := []providers.Message{
 		{
@@ -263,6 +282,11 @@ func (t *SubagentTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Optional short label for the task (for display)",
 			},
+			"type": map[string]any{
+				"type":        "string",
+				"enum":        []string{"default", "web_dev", "ui_designer", "researcher"},
+				"description": "Specialized agent type with custom system prompts and focuses.",
+			},
 		},
 		"required": []string{"task"},
 	}
@@ -275,33 +299,37 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	}
 
 	label, _ := args["label"].(string)
+	agentType, _ := args["type"].(string)
+	if agentType == "" {
+		agentType = "default"
+	}
 
 	if t.manager == nil {
 		return ErrorResult("Subagent manager not configured").WithError(fmt.Errorf("manager is nil"))
 	}
 
-	// Build messages for subagent
+	// Build messages for subagent with specialized system prompt
+	systemPrompt := "You are a subagent. Complete the given task independently and provide a clear, concise result."
+	switch agentType {
+	case "web_dev":
+		systemPrompt = "You are a specialized Web Development subagent. Build, debug, or improve web applications. Use the browser to verify work."
+	case "ui_designer":
+		systemPrompt = "You are a specialized UI/UX Design subagent. Focus on aesthetics and premium visual quality."
+	case "researcher":
+		systemPrompt = "You are a specialized Research subagent. Find deep, accurate, and synthesized information."
+	}
+
+	// Build messages for subagent with specialized system prompt
 	messages := []providers.Message{
 		{
 			Role:    "system",
-			Content: "You are a subagent. Complete the given task independently and provide a clear, concise result.",
+			Content: systemPrompt,
 		},
 		{
 			Role:    "user",
 			Content: task,
 		},
 	}
-
-	// Use RunToolLoop to execute with tools (same as async SpawnTool)
-	sm := t.manager
-	sm.mu.RLock()
-	tools := sm.tools
-	maxIter := sm.maxIterations
-	maxTokens := sm.maxTokens
-	temperature := sm.temperature
-	hasMaxTokens := sm.hasMaxTokens
-	hasTemperature := sm.hasTemperature
-	sm.mu.RUnlock()
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {

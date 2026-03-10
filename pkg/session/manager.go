@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ type Session struct {
 	Metadata map[string]any      `json:"metadata,omitempty"`
 	Created  time.Time           `json:"created"`
 	Updated  time.Time           `json:"updated"`
+	Checksum uint32              `json:"checksum,omitempty"`
 }
 
 type SessionManager struct {
@@ -227,7 +229,16 @@ func (sm *SessionManager) Save(key string) error {
 	}
 	sm.mu.RUnlock()
 
+	// Calculate checksum of JSON without checksum field
+	snapshot.Checksum = 0
 	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+	snapshot.Checksum = crc32.ChecksumIEEE(data)
+
+	// Re-marshal with checksum
+	data, err = json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -305,8 +316,24 @@ func (sm *SessionManager) loadSessions() error {
 			// Try to recover from backup
 			if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil {
 				if err := json.Unmarshal(bakData, &session); err == nil {
-					sm.sessions[session.Key] = &session
-					continue
+					if sm.verifyChecksum(&session) {
+						sm.sessions[session.Key] = &session
+						continue
+					}
+				}
+			}
+			continue
+		}
+
+		if !sm.verifyChecksum(&session) {
+			// Try backup if primary is corrupted
+			if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil {
+				var bakSession Session
+				if err := json.Unmarshal(bakData, &bakSession); err == nil {
+					if sm.verifyChecksum(&bakSession) {
+						sm.sessions[bakSession.Key] = &bakSession
+						continue
+					}
 				}
 			}
 			continue
@@ -332,4 +359,19 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 		session.Messages = msgs
 		session.Updated = time.Now()
 	}
+}
+
+func (sm *SessionManager) verifyChecksum(s *Session) bool {
+	if s.Checksum == 0 {
+		return true // Legacy session
+	}
+	saved := s.Checksum
+	s.Checksum = 0
+	defer func() { s.Checksum = saved }()
+
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return false
+	}
+	return crc32.ChecksumIEEE(data) == saved
 }

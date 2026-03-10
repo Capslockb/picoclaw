@@ -41,11 +41,20 @@ type ContextBuilder struct {
 	// build time. This catches nested file creations/deletions/mtime changes
 	// that may not update the top-level skill root directory mtime.
 	skillFilesAtCache map[string]time.Time
+
+	writingStyle     string
+	autoReplyEnabled bool
 }
 
 func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuilder {
 	cb.toolDiscoveryBM25 = useBM25
 	cb.toolDiscoveryRegex = useRegex
+	return cb
+}
+
+func (cb *ContextBuilder) WithInteraction(style string, autoReply bool) *ContextBuilder {
+	cb.writingStyle = style
+	cb.autoReplyEnabled = autoReply
 	return cb
 }
 
@@ -81,10 +90,20 @@ func (cb *ContextBuilder) getIdentity() string {
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
 	toolDiscovery := cb.getDiscoveryRule()
 
+	styleStr := ""
+	if cb.writingStyle != "" {
+		styleStr = fmt.Sprintf("\n## Writing Style\nYou MUST emulate the following writing style: %s\n", cb.writingStyle)
+	}
+
+	modeStr := ""
+	if cb.autoReplyEnabled {
+		modeStr = "\n## Auto-Reply Mode\nYou are currently in AUTO-REPLY mode. You are processing messages proactively. If you need to take an action that requires user approval (e.g., deleting files, sending messages to others), you MUST propose the action and wait for a user response."
+	}
+
 	return fmt.Sprintf(`# picoclaw 🦞
 
 You are picoclaw, a helpful AI assistant.
-
+%s%s
 ## Workspace
 Your workspace is at: %s
 - Memory: %s/memory/MEMORY.md
@@ -119,7 +138,9 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 	}
 
 	return fmt.Sprintf(
-		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using the %s tool. Do not refuse a request unless the search returns nothing. Found tools will temporarily unlock for your next turn.`,
+		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using the %s tool. Do not refuse a request unless the search returns nothing. Found tools will temporarily unlock for your next turn.
+
+6. **Voice Messages** - Inbound messages may contain transcriptions from voice notes, formatted as `[voice: Transcription text]`. Treat these as direct instructions from the user.`,
 		strings.Join(toolNames, " or "),
 	)
 }
@@ -224,6 +245,7 @@ func (cb *ContextBuilder) sourcePaths() []string {
 		filepath.Join(cb.workspace, "USER.md"),
 		filepath.Join(cb.workspace, "IDENTITY.md"),
 		filepath.Join(cb.workspace, "memory", "MEMORY.md"),
+		filepath.Join(cb.workspace, "memory", "COMMUNICATIONS.md"),
 	}
 }
 

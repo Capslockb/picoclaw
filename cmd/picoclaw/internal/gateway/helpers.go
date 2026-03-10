@@ -143,6 +143,13 @@ func gatewayCmd(debug bool) error {
 		logger.InfoCF("voice", "Transcription enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
 	}
 
+	// Wire up speech synthesis if ElevenLabs is configured.
+	if cfg.Tools.ElevenLabs.Enabled && cfg.Tools.ElevenLabs.APIKey != "" {
+		elSynth := voice.NewElevenLabsSynthesizer(cfg.Tools.ElevenLabs.APIKey, cfg.Tools.ElevenLabs.VoiceID)
+		agentLoop.AddSynthesizer(elSynth)
+		logger.InfoCF("voice", "Speech synthesis enabled (ElevenLabs)", map[string]any{"voice_id": cfg.Tools.ElevenLabs.VoiceID})
+	}
+
 	enabledChannels := channelManager.GetEnabledChannels()
 	if len(enabledChannels) > 0 {
 		fmt.Printf("✓ Channels enabled: %s\n", enabledChannels)
@@ -160,6 +167,14 @@ func gatewayCmd(debug bool) error {
 		fmt.Printf("Error starting cron service: %v\n", err)
 	}
 	fmt.Println("✓ Cron service started")
+
+	// Setup proactive service
+	proactiveService := agent.NewProactiveService(cronService, cfg.Tools.Proactive)
+	if err := proactiveService.Start(); err != nil {
+		fmt.Printf("Error starting proactive service: %v\n", err)
+	}
+	agentLoop.SetProactiveService(proactiveService)
+	fmt.Println("✓ Proactive service started")
 
 	if err := heartbeatService.Start(); err != nil {
 		fmt.Printf("Error starting heartbeat service: %v\n", err)
