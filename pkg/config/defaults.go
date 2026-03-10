@@ -474,6 +474,9 @@ func DefaultConfig() *Config {
 			InstallSkill: ToolConfig{
 				Enabled: true,
 			},
+			Google: ToolConfig{
+				Enabled: true,
+			},
 			ListDir: ToolConfig{
 				Enabled: true,
 			},

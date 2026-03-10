@@ -1833,6 +1833,12 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			}
 			return nil
 		},
+		GetChannel: func(name string) (any, bool) {
+			if al.channelManager == nil {
+				return nil, false
+			}
+			return al.channelManager.GetChannel(name)
+		},
 	}
 	if agent != nil {
 		rt.GetModelInfo = func() (string, string) {

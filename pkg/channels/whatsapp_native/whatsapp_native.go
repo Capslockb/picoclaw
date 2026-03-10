@@ -59,6 +59,7 @@ type WhatsAppNativeChannel struct {
 	reconnecting bool
 	stopping     atomic.Bool    // set once Stop begins; prevents new wg.Add calls
 	wg           sync.WaitGroup // tracks background goroutines (QR handler, reconnect)
+	lastQR       string         // stores the last QR code string for retrieval
 }
 
 // NewWhatsAppNativeChannel creates a WhatsApp channel that uses whatsmeow for connection.
@@ -187,6 +188,9 @@ func (c *WhatsAppNativeChannel) Start(ctx context.Context) error {
 					}
 					if evt.Event == "code" {
 						logger.InfoCF("whatsapp", "Scan this QR code with WhatsApp (Linked Devices):", nil)
+						c.mu.Lock()
+						c.lastQR = evt.Code
+						c.mu.Unlock()
 						qrterminal.GenerateWithConfig(evt.Code, qrterminal.Config{
 							Level:      qrterminal.L,
 							Writer:     os.Stdout,
@@ -445,4 +449,10 @@ func parseJID(s string) (types.JID, error) {
 		return types.ParseJID(s)
 	}
 	return types.NewJID(s, types.DefaultUserServer), nil
+}
+
+func (c *WhatsAppNativeChannel) GetLastQR() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastQR
 }

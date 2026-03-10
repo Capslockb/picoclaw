@@ -53,7 +53,7 @@ func GoogleAntigravityOAuthConfig() OAuthProviderConfig {
 		TokenURL:     "https://oauth2.googleapis.com/token",
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
+		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
 		Port:         51121,
 	}
 }

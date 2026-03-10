@@ -79,6 +79,9 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("list_dir") {
 		toolsRegistry.Register(tools.NewListDirTool(workspace, readRestrict, allowReadPaths))
 	}
+	if cfg.Tools.IsToolEnabled("google") {
+		toolsRegistry.Register(&tools.GoogleTool{})
+	}
 	if cfg.Tools.IsToolEnabled("exec") {
 		execTool, err := tools.NewExecToolWithConfig(workspace, restrict, cfg)
 		if err != nil {

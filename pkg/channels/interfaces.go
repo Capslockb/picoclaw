@@ -50,3 +50,9 @@ type PlaceholderRecorder interface {
 type CommandRegistrarCapable interface {
 	RegisterCommands(ctx context.Context, defs []commands.Definition) error
 }
+
+// QRProvider is implemented by channels that can provide a QR code string
+// (e.g. for WhatsApp pairing).
+type QRProvider interface {
+	GetLastQR() string
+}

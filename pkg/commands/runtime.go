@@ -14,4 +14,5 @@ type Runtime struct {
 	SwitchModel        func(value string) (oldModel string, err error)
 	SwitchChannel      func(value string) error
 	ClearHistory       func() error
+	GetChannel         func(name string) (any, bool)
 }
