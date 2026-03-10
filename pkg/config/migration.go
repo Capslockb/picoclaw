@@ -14,11 +14,11 @@ import (
 // If the model already contains a "/" (indicating it has a protocol prefix), it is returned as-is.
 // Otherwise, the protocol prefix is added.
 func buildModelWithProtocol(protocol, model string) string {
-	if strings.Contains(model, "/") {
-		// Model already has a protocol prefix, return as-is
+	prefix := protocol + "/"
+	if strings.HasPrefix(model, prefix) {
 		return model
 	}
-	return protocol + "/" + model
+	return prefix + model
 }
 
 // providerMigrationConfig defines how to migrate a provider from old config to new format.
