@@ -19,6 +19,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/commands"
@@ -49,6 +51,7 @@ type AgentLoop struct {
 	transcriber    voice.Transcriber
 	cmdRegistry    *commands.Registry
 	version        string
+	sf             singleflight.Group
 	wg             sync.WaitGroup
 }
 
@@ -980,7 +983,7 @@ func (al *AgentLoop) runLLMIteration(
 			})
 
 		// Build tool definitions
-		providerToolDefs := agent.Tools.ToProviderDefs()
+		providerToolDefs := al.selectRelevantTools(agent, opts.UserMessage)
 
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
@@ -1410,15 +1413,15 @@ func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, c
 
 	if len(newHistory) > agent.SummarizeMessageThreshold || tokenEstimate > threshold {
 		summarizeKey := agent.ID + ":" + sessionKey
-		if _, loading := al.summarizing.LoadOrStore(summarizeKey, true); !loading {
+		al.sf.Do(summarizeKey, func() (interface{}, error) {
 			al.wg.Add(1)
 			go func() {
 				defer al.wg.Done()
-				defer al.summarizing.Delete(summarizeKey)
 				logger.Debug("Memory threshold reached. Optimizing conversation history...")
 				al.summarizeSession(agent, sessionKey)
 			}()
-		}
+			return nil, nil
+		})
 	}
 }
 
