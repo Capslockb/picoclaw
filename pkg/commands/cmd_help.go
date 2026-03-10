@@ -2,8 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
-	"strings"
 )
 
 func helpCommand() Definition {

@@ -88,6 +88,7 @@ type Manager struct {
 	placeholders  sync.Map // "channel:chatID" → placeholderID (string)
 	typingStops   sync.Map // "channel:chatID" → func()
 	reactionUndos sync.Map // "channel:chatID" → reactionEntry
+	chatLimiters  sync.Map // "channel:chatID" → *rate.Limiter
 }
 
 type asyncTask struct {
@@ -499,16 +500,23 @@ func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) 
 //   - ErrNotRunning / ErrSendFailed: permanent, no retry
 //   - ErrRateLimit: fixed delay retry
 //   - ErrTemporary / unknown: exponential backoff retry
+// sendWithRetry sends a message through the channel with rate limiting and
+// retry logic. It classifies errors to determine the retry strategy.
 func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWorker, msg bus.OutboundMessage) {
-	// Rate limit: wait for token
+	// 1. Channel-level rate limit
 	if err := w.limiter.Wait(ctx); err != nil {
-		// ctx canceled, shutting down
+		return
+	}
+
+	// 2. Per-chat rate limit (prevent one chat from hogging the worker)
+	chatLimitKey := name + ":" + msg.ChatID
+	if err := m.getChatLimiter(chatLimitKey).Wait(ctx); err != nil {
 		return
 	}
 
 	// Pre-send: stop typing and try to edit placeholder
 	if m.preSend(ctx, name, msg, w.ch) {
-		return // placeholder was edited successfully, skip Send
+		return
 	}
 
 	var lastErr error
@@ -798,6 +806,17 @@ func (m *Manager) RegisterChannel(name string, channel Channel) {
 	defer m.mu.Unlock()
 	m.channels[name] = channel
 }
+
+func (m *Manager) getChatLimiter(key string) *rate.Limiter {
+	if v, ok := m.chatLimiters.Load(key); ok {
+		return v.(*rate.Limiter)
+	}
+	// Per-chat budget: 1 burst, refill 1 every 2 seconds.
+	lim := rate.NewLimiter(rate.Every(2*time.Second), 1)
+	actual, _ := m.chatLimiters.LoadOrStore(key, lim)
+	return actual.(*rate.Limiter)
+}
+
 
 func (m *Manager) UnregisterChannel(name string) {
 	m.mu.Lock()
