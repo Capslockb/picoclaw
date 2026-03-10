@@ -431,6 +431,25 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		}
 		return localPath // fallback: use raw path
 	}
+	if message.ReplyToMessage != nil {
+		replyText := message.ReplyToMessage.Text
+		if replyText == "" {
+			replyText = message.ReplyToMessage.Caption
+		}
+		if message.ReplyToMessage.Document != nil {
+			if replyText != "" {
+				replyText += "\n"
+			}
+			fileName := message.ReplyToMessage.Document.FileName
+			if fileName == "" {
+				fileName = "document"
+			}
+			replyText += fmt.Sprintf("[attached file: %s]", fileName)
+		}
+		if replyText != "" {
+			content += fmt.Sprintf("> Replying to: %s\n\n", utils.Truncate(replyText, 200))		
+		}
+	}
 
 	if message.Text != "" {
 		content += message.Text
@@ -481,13 +500,18 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	if message.Document != nil {
 		docPath := c.downloadFile(ctx, message.Document.FileID, "")
 		if docPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(docPath, "document"))
+			fileName := message.Document.FileName
+			if fileName == "" {
+				fileName = "document"
+			}
+			mediaPaths = append(mediaPaths, storeMedia(docPath, fileName))
 			if content != "" {
 				content += "\n"
 			}
-			content += "[file]"
+			content += fmt.Sprintf("[attached file: %s]", fileName)
 		}
 	}
+
 
 	if content == "" {
 		content = "[empty message]"
