@@ -112,6 +112,53 @@ The stack is provider-agnostic, but a practical low-cost deployment can split wo
 - Voice can use STT/TTS providers that are better than a general-purpose chat model.
 - Workspace actions like Gmail or Drive are usually better handled as tool/API calls than as LLM-only reasoning.
 
+## ⚙️ How It Works
+
+At a high level, PicoClaw is a small Go runtime that sits between chat channels, tools, and model providers:
+
+1. A message arrives from Telegram, WhatsApp Native, CLI, or another enabled channel.
+2. PicoClaw resolves the active agent, workspace, conversation scope, and available tools.
+3. The agent picks the right provider path for the turn:
+   - text -> main chat model chain
+   - image -> image model chain
+   - voice -> STT / TTS chain
+   - actions -> local tools or external APIs
+4. Tool calls run locally in the workspace or through configured APIs such as Google Workspace.
+5. Results are fed back into the agent loop until the task is done, then a final reply is sent back through the original channel.
+
+This means PicoClaw is not only a chat wrapper around one LLM. It is closer to a small execution runtime:
+
+- channels handle transport
+- agent loop handles routing, memory, retries, and tool orchestration
+- providers handle model calls
+- tools handle real work such as shell, file I/O, web fetch, previews, scheduling, and integrations
+- workspace state keeps per-user or per-agent context on disk
+
+## 🧭 Practical Operating Model
+
+In a real deployment, PicoClaw works best when each capability is given the cheapest reliable path instead of forcing everything through one provider:
+
+- conversation stays on a low-cost text model
+- image understanding is routed directly to a vision-capable model
+- voice uses dedicated speech providers for transcription and synthesis
+- Gmail, Drive, and Calendar are handled through explicit tool/API calls
+- previews are served locally from the built-in preview server instead of an external platform
+
+That design keeps the runtime portable enough for low-end hardware, including RISC-V boards, while still allowing richer multi-modal behavior.
+
+## 🔧 What Still Needs Improving
+
+PicoClaw is useful today, but the front page should be honest about where the system still needs work:
+
+- Tool-call robustness: malformed or partially emitted tool arguments still happen and recovery is not perfect.
+- Long-running task continuity: multi-minute jobs need better checkpointing and recovery across restarts.
+- Preview workflow polish: stable preview URLs now exist, but site build flows still need better automatic follow-up and status reporting.
+- Safer default behavior: command execution, git operations, and external fetches need tighter default guardrails for shared or production environments.
+- Provider ergonomics: model aliasing, fallback transparency, and capability-specific routing should be easier to understand from config alone.
+- Event-driven integrations: inbox watching, reminders, and notification workflows still rely too much on polling or inferred tool usage.
+- Docs consistency: feature docs, migration docs, and live deployment docs need to stay closer to the actual shipped behavior.
+- Worktree hygiene: active development branches can accumulate large dirty states; release-ready branches and cleaner change isolation need improvement.
+
 ## 🦾 Demonstration
 
 ### 🛠️ Standard Assistant Workflows
