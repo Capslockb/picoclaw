@@ -10,8 +10,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"html/template"
 	"math"
+	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +45,7 @@ const (
 	janitorInterval = 10 * time.Second
 	typingStopTTL   = 5 * time.Minute
 	placeholderTTL  = 10 * time.Minute
+	previewHost     = "0.0.0.0"
 )
 
 // typingEntry wraps a typing stop function with a creation timestamp for TTL eviction.
@@ -66,6 +76,158 @@ var channelRateConfig = map[string]float64{
 	"irc":      2,
 }
 
+var rootDashboardTemplate = template.Must(template.New("root_dashboard").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PicoClaw Dashboard</title>
+  <style>
+    :root {
+      --bg: radial-gradient(1200px 600px at 10% -10%, #243b55 0%, #0f2027 35%, #0b0f14 100%);
+      --card: rgba(255,255,255,0.06);
+      --card-border: rgba(255,255,255,0.12);
+      --text: #eaf2ff;
+      --muted: #9fb4d1;
+      --ok: #1fd29b;
+      --warn: #ffd166;
+      --accent: #65b7ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 18px 36px; }
+    .hero {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
+      margin-bottom: 18px;
+    }
+    .title { font-size: 30px; font-weight: 700; letter-spacing: 0.4px; margin: 0; }
+    .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px;
+      backdrop-filter: blur(8px);
+    }
+    .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+    .v { font-size: 18px; margin-top: 6px; font-weight: 650; }
+    .list { margin: 0; padding-left: 18px; line-height: 1.6; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .chip {
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.04);
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1 class="title">PicoClaw Dashboard</h1>
+        <p class="sub">Live runtime overview for channels and health endpoints</p>
+      </div>
+      <div class="chip">Generated {{.GeneratedAt}}</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="k">Service</div>
+        <div class="v">picoclaw <span class="ok">online</span></div>
+      </div>
+      <div class="card">
+        <div class="k">Gateway</div>
+        <div class="v">{{.Address}}</div>
+      </div>
+      <div class="card">
+        <div class="k">Channels Enabled</div>
+        <div class="v">{{len .Channels}}</div>
+      </div>
+      <div class="card">
+        <div class="k">Health</div>
+        <div class="v"><a href="/health">/health</a> · <a href="/ready">/ready</a></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="k">Channel List</div>
+      {{if .Channels}}
+      <div class="row">
+        {{range .Channels}}<span class="chip">{{.}}</span>{{end}}
+      </div>
+      {{else}}
+      <p class="warn">No channels currently registered.</p>
+      {{end}}
+    </div>
+
+    <div class="card">
+      <div class="k">Webhook Routes</div>
+      {{if .Webhooks}}
+      <ul class="list">
+        {{range .Webhooks}}
+        <li><strong>{{.Name}}</strong>: <a href="{{.Path}}">{{.Path}}</a></li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="warn">No webhook routes registered.</p>
+      {{end}}
+    </div>
+
+    <p class="footer">Tip: this page auto-refreshes health status every 15s using /health and /ready.</p>
+  </div>
+  <script>
+    async function ping(path) {
+      try {
+        const r = await fetch(path, { cache: "no-store" });
+        return r.ok;
+      } catch (_) { return false; }
+    }
+    async function run() {
+      const h = await ping("/health");
+      const r = await ping("/ready");
+      const title = document.querySelector(".title");
+      if (title) {
+        title.textContent = h && r ? "PicoClaw Dashboard" : "PicoClaw Dashboard (degraded)";
+      }
+      setTimeout(run, 15000);
+    }
+    run();
+  </script>
+</body>
+</html>`))
+
+type dashboardWebhook struct {
+	Name string
+	Path string
+}
+
+type dashboardViewData struct {
+	Address     string
+	GeneratedAt string
+	Channels    []string
+	Webhooks    []dashboardWebhook
+}
+
 type channelWorker struct {
 	ch         Channel
 	queue      chan bus.OutboundMessage
@@ -75,19 +237,30 @@ type channelWorker struct {
 	limiter    *rate.Limiter
 }
 
+type previewMount struct {
+	Root      string
+	Entry     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Manager struct {
-	channels      map[string]Channel
-	workers       map[string]*channelWorker
-	bus           *bus.MessageBus
-	config        *config.Config
-	mediaStore    media.MediaStore
-	dispatchTask  *asyncTask
-	mux           *http.ServeMux
-	httpServer    *http.Server
-	mu            sync.RWMutex
-	placeholders  sync.Map // "channel:chatID" → placeholderID (string)
-	typingStops   sync.Map // "channel:chatID" → func()
-	reactionUndos sync.Map // "channel:chatID" → reactionEntry
+	channels              map[string]Channel
+	workers               map[string]*channelWorker
+	bus                   *bus.MessageBus
+	config                *config.Config
+	mediaStore            media.MediaStore
+	dispatchTask          *asyncTask
+	mux                   *http.ServeMux
+	httpServer            *http.Server
+	previewServer         *http.Server
+	previewAddr           string
+	previews              map[string]previewMount
+	controlPlaneDiagnoser func(context.Context, string) (string, error)
+	mu                    sync.RWMutex
+	placeholders          sync.Map // "channel:chatID" → placeholderID (string)
+	typingStops           sync.Map // "channel:chatID" → func()
+	reactionUndos         sync.Map // "channel:chatID" → reactionEntry
 }
 
 type asyncTask struct {
@@ -156,6 +329,7 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 		bus:        messageBus,
 		config:     cfg,
 		mediaStore: store,
+		previews:   make(map[string]previewMount),
 	}
 
 	if err := m.initChannels(); err != nil {
@@ -163,6 +337,14 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 	}
 
 	return m, nil
+}
+
+// SetControlPlaneDiagnoser injects a callback used by the control-plane UI when
+// an operator requests an LLM-backed diagnosis from the backend.
+func (m *Manager) SetControlPlaneDiagnoser(fn func(context.Context, string) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.controlPlaneDiagnoser = fn
 }
 
 // initChannel is a helper that looks up a factory by name and creates the channel.
@@ -293,6 +475,47 @@ func (m *Manager) initChannels() error {
 func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 	m.mux = http.NewServeMux()
 
+	// Register the control-plane dashboard and API (root endpoint).
+	m.registerControlPlaneRoutes(addr)
+	m.setupPreviewServer(addr)
+
+	// Keep the original lightweight dashboard available as fallback.
+	m.mux.HandleFunc("/legacy-dashboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/legacy-dashboard" {
+			http.NotFound(w, r)
+			return
+		}
+
+		data := dashboardViewData{
+			Address:     addr,
+			GeneratedAt: time.Now().Format(time.RFC3339),
+			Channels:    make([]string, 0, len(m.channels)),
+			Webhooks:    make([]dashboardWebhook, 0, len(m.channels)),
+		}
+
+		m.mu.RLock()
+		for name, ch := range m.channels {
+			data.Channels = append(data.Channels, name)
+			if wh, ok := ch.(WebhookHandler); ok {
+				data.Webhooks = append(data.Webhooks, dashboardWebhook{
+					Name: name,
+					Path: wh.WebhookPath(),
+				})
+			}
+		}
+		m.mu.RUnlock()
+
+		sort.Strings(data.Channels)
+		sort.Slice(data.Webhooks, func(i, j int) bool { return data.Webhooks[i].Name < data.Webhooks[j].Name })
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := rootDashboardTemplate.Execute(w, data); err != nil {
+			logger.ErrorCF("channels", "legacy dashboard render failed", map[string]any{"error": err.Error()})
+			http.Error(w, "legacy dashboard render failed", http.StatusInternalServerError)
+			return
+		}
+	})
+
 	// Register health endpoints
 	if healthServer != nil {
 		healthServer.RegisterOnMux(m.mux)
@@ -322,6 +545,245 @@ func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+}
+
+func (m *Manager) setupPreviewServer(addr string) {
+	previewAddr := derivePreviewAddr(addr)
+	previewMux := http.NewServeMux()
+	previewMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("PicoClaw preview server\n"))
+	})
+	previewMux.HandleFunc("/preview/", m.handlePreviewRequest)
+	m.previewAddr = previewAddr
+	m.previewServer = &http.Server{
+		Addr:         previewAddr,
+		Handler:      previewMux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+}
+
+func derivePreviewAddr(addr string) string {
+	_, port := splitHostPort(addr)
+	if port <= 0 {
+		port = 3001
+	}
+	return net.JoinHostPort(previewHost, fmt.Sprintf("%d", port+1))
+}
+
+func splitHostPort(addr string) (string, int) {
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return "", 0
+	}
+	port, err := net.LookupPort("tcp", portStr)
+	if err != nil {
+		return host, 0
+	}
+	return host, port
+}
+
+func sanitizePreviewSlug(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevDash := false
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if prevDash {
+			continue
+		}
+		b.WriteByte('-')
+		prevDash = true
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func defaultPreviewSlug(root string) string {
+	base := sanitizePreviewSlug(filepath.Base(strings.TrimSpace(root)))
+	if base == "" {
+		base = "preview"
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(root))
+	return fmt.Sprintf("%s-%08x", base, h.Sum32())
+}
+
+func (m *Manager) PublishPreview(root, entry, slug string) (string, string, string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", "", "", fmt.Errorf("preview root is required")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", "", "", fmt.Errorf("resolve preview root: %w", err)
+	}
+	info, err := os.Stat(absRoot)
+	if err != nil {
+		return "", "", "", fmt.Errorf("preview root not found: %w", err)
+	}
+	if !info.IsDir() {
+		return "", "", "", fmt.Errorf("preview root must be a directory")
+	}
+
+	entry = strings.TrimSpace(strings.TrimLeft(filepath.ToSlash(entry), "/"))
+	if entry != "" {
+		if strings.HasPrefix(entry, "../") || entry == ".." {
+			return "", "", "", fmt.Errorf("preview entry escapes hosted directory")
+		}
+		entryPath := filepath.Join(absRoot, filepath.FromSlash(entry))
+		entryInfo, statErr := os.Stat(entryPath)
+		if statErr != nil {
+			return "", "", "", fmt.Errorf("preview entry not found: %w", statErr)
+		}
+		if entryInfo.IsDir() {
+			entry = strings.TrimSuffix(entry, "/") + "/index.html"
+		}
+	} else if _, statErr := os.Stat(filepath.Join(absRoot, "index.html")); statErr == nil {
+		entry = "index.html"
+	}
+
+	slug = sanitizePreviewSlug(slug)
+	if slug == "" {
+		slug = defaultPreviewSlug(absRoot)
+	}
+
+	now := time.Now()
+	m.mu.Lock()
+	createdAt := now
+	if existing, ok := m.previews[slug]; ok {
+		createdAt = existing.CreatedAt
+	}
+	m.previews[slug] = previewMount{Root: absRoot, Entry: entry, CreatedAt: createdAt, UpdatedAt: now}
+	m.mu.Unlock()
+
+	tailscaleBase, localBase := m.previewBases()
+	return slug, buildPreviewURL(tailscaleBase, slug, entry), buildPreviewURL(localBase, slug, entry), nil
+}
+
+func (m *Manager) previewBases() (string, string) {
+	_, port := splitHostPort(m.previewAddr)
+	if port <= 0 {
+		port = 3002
+	}
+	localBase := fmt.Sprintf("http://127.0.0.1:%d", port)
+	tailscaleIP := detectTailscaleIPv4()
+	if tailscaleIP == "" {
+		return "", localBase
+	}
+	return fmt.Sprintf("http://%s:%d", tailscaleIP, port), localBase
+}
+
+func detectTailscaleIPv4() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tailscale", "ip", "-4")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func buildPreviewURL(base, slug, entry string) string {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(slug) == "" {
+		return ""
+	}
+	base = strings.TrimRight(base, "/")
+	urlPath := "/preview/" + slug + "/"
+	if entry != "" {
+		urlPath += strings.TrimLeft(filepath.ToSlash(entry), "/")
+	}
+	return base + urlPath
+}
+
+func (m *Manager) handlePreviewRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	trimmed := strings.TrimPrefix(path.Clean(r.URL.Path), "/preview/")
+	if trimmed == "." || trimmed == "" || strings.HasPrefix(trimmed, "../") {
+		http.NotFound(w, r)
+		return
+	}
+	parts := strings.SplitN(trimmed, "/", 2)
+	slug := parts[0]
+	relPath := ""
+	if len(parts) == 2 {
+		relPath = strings.TrimPrefix(parts[1], "/")
+	}
+
+	m.mu.RLock()
+	mount, ok := m.previews[slug]
+	m.mu.RUnlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	if relPath == "" {
+		relPath = mount.Entry
+	}
+	if relPath == "" {
+		relPath = "."
+	}
+	relPath = strings.TrimPrefix(path.Clean("/"+relPath), "/")
+	if strings.HasPrefix(relPath, "../") || relPath == ".." {
+		http.NotFound(w, r)
+		return
+	}
+
+	target := filepath.Join(mount.Root, filepath.FromSlash(relPath))
+	if !isPreviewPathWithin(target, mount.Root) {
+		http.NotFound(w, r)
+		return
+	}
+	if info, err := os.Stat(target); err == nil {
+		if info.IsDir() {
+			indexPath := filepath.Join(target, "index.html")
+			if _, statErr := os.Stat(indexPath); statErr == nil {
+				http.ServeFile(w, r, indexPath)
+				return
+			}
+		} else {
+			http.ServeFile(w, r, target)
+			return
+		}
+	}
+
+	if mount.Entry != "" && path.Ext(relPath) == "" {
+		fallback := filepath.Join(mount.Root, filepath.FromSlash(mount.Entry))
+		if isPreviewPathWithin(fallback, mount.Root) {
+			if _, err := os.Stat(fallback); err == nil {
+				http.ServeFile(w, r, fallback)
+				return
+			}
+		}
+	}
+
+	http.NotFound(w, r)
+}
+
+func isPreviewPathWithin(candidate, root string) bool {
+	root = filepath.Clean(root)
+	candidate = filepath.Clean(candidate)
+	rel, err := filepath.Rel(root, candidate)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func (m *Manager) StartAll(ctx context.Context) error {
@@ -377,6 +839,19 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		}()
 	}
 
+	if m.previewServer != nil {
+		go func() {
+			logger.InfoCF("channels", "Preview server listening", map[string]any{
+				"addr": m.previewServer.Addr,
+			})
+			if err := m.previewServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.ErrorCF("channels", "Preview server error", map[string]any{
+					"error": err.Error(),
+				})
+			}
+		}()
+	}
+
 	logger.InfoC("channels", "All channels started")
 	return nil
 }
@@ -397,6 +872,17 @@ func (m *Manager) StopAll(ctx context.Context) error {
 			})
 		}
 		m.httpServer = nil
+	}
+
+	if m.previewServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := m.previewServer.Shutdown(shutdownCtx); err != nil {
+			logger.ErrorCF("channels", "Preview server shutdown error", map[string]any{
+				"error": err.Error(),
+			})
+		}
+		m.previewServer = nil
 	}
 
 	// Cancel dispatcher

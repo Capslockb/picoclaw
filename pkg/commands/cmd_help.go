@@ -28,7 +28,7 @@ func formatHelpMessage(defs []Definition) string {
 		return "No commands available."
 	}
 
-	lines := make([]string, 0, len(defs))
+	lines := make([]string, 0, len(defs)+8)
 	for _, def := range defs {
 		usage := def.EffectiveUsage()
 		if usage == "" {
@@ -40,5 +40,14 @@ func formatHelpMessage(defs []Definition) string {
 		}
 		lines = append(lines, fmt.Sprintf("%s - %s", usage, desc))
 	}
+
+	lines = append(lines, "")
+	lines = append(lines, "Quick Ops:")
+	lines = append(lines, "/switch openrouter - switch to OpenRouter free profile")
+	lines = append(lines, "/check gws - show Google Workspace auth status")
+	lines = append(lines, "/exec gws gmail +triage --max 5 --format table - list recent email via gws")
+	lines = append(lines, "/exec gws drive files list --params '{\"pageSize\":10}' --format table - list recent drive files")
+	lines = append(lines, "/exec gws calendar +agenda --days 3 --format table - list upcoming calendar events")
+
 	return strings.Join(lines, "\n")
 }

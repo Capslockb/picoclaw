@@ -101,7 +101,11 @@ func NewRegistryManagerFromConfig(cfg RegistryConfig) *RegistryManager {
 		rm.maxConcurrent = cfg.MaxConcurrentSearches
 	}
 	if cfg.ClawHub.Enabled {
-		rm.AddRegistry(NewClawHubRegistry(cfg.ClawHub))
+		if err := ValidateTrustedClawHubConfig(cfg.ClawHub); err != nil {
+			slog.Warn("skills registry disabled: clawhub config is not trusted", "error", err)
+		} else {
+			rm.AddRegistry(NewClawHubRegistry(cfg.ClawHub))
+		}
 	}
 	return rm
 }

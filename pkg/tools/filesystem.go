@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -127,7 +130,218 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
+	if looksLikePDF(path, content) {
+		extracted, method, extractErr := extractPDFText(ctx, path)
+		if extractErr != nil {
+			return ErrorResult(fmt.Sprintf("failed to extract PDF text: %v", extractErr))
+		}
+		if strings.TrimSpace(extracted) != "" {
+			return NewToolResult(fmt.Sprintf("[pdf text extracted via %s]\n%s", method, extracted))
+		}
+		return ErrorResult("failed to extract PDF text: empty result")
+	}
 	return NewToolResult(string(content))
+}
+
+func looksLikePDF(path string, content []byte) bool {
+	if strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".pdf") {
+		return true
+	}
+	return bytes.HasPrefix(content, []byte("%PDF-"))
+}
+
+func extractPDFText(ctx context.Context, path string) (string, string, error) {
+	if text, err := extractPDFTextWithPoppler(ctx, path); err == nil && isUsefulPDFText(text) {
+		return text, "pdftotext", nil
+	}
+
+	if text, err := extractPDFTextWithOCR(ctx, path); err == nil && isUsefulPDFText(text) {
+		return text, "ocr", nil
+	}
+
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return "", "", fmt.Errorf("pdftotext not available; install poppler-utils")
+	}
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		return "", "", fmt.Errorf("pdftoppm not available; install poppler-utils")
+	}
+	if _, err := exec.LookPath("tesseract"); err != nil {
+		return "", "", fmt.Errorf("tesseract not available")
+	}
+	return "", "", fmt.Errorf("no usable text could be extracted from the PDF")
+}
+
+func extractPDFTextWithPoppler(ctx context.Context, path string) (string, error) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return "", err
+	}
+
+	tmpFile, err := os.CreateTemp("", "picoclaw-pdf-*.txt")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	_ = tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	cmd := exec.CommandContext(ctx, "pdftotext", "-layout", "-nopgbrk", path, tmpPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("pdftotext failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func extractPDFTextWithOCR(ctx context.Context, path string) (string, error) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		return "", err
+	}
+	if _, err := exec.LookPath("tesseract"); err != nil {
+		return "", err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "picoclaw-pdf-ocr-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	prefix := filepath.Join(tmpDir, "page")
+	cmd := exec.CommandContext(ctx, "pdftoppm", "-png", path, prefix)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("pdftoppm failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	pages, err := filepath.Glob(prefix + "-*.png")
+	if err != nil {
+		return "", err
+	}
+	if len(pages) == 0 {
+		return "", fmt.Errorf("no pages rendered for OCR")
+	}
+	sort.Strings(pages)
+
+	langs := preferredTesseractOCRLanguages()
+	var parts []string
+	for _, page := range pages {
+		args := []string{page, "stdout", "--psm", "6"}
+		if langs != "" {
+			args = append(args, "-l", langs)
+		}
+		cmd := exec.CommandContext(ctx, "tesseract", args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("tesseract failed on %s: %v: %s", filepath.Base(page), err, strings.TrimSpace(string(out)))
+		}
+		text := strings.TrimSpace(string(out))
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+func preferredTesseractOCRLanguages() string {
+	override := strings.TrimSpace(os.Getenv("PICO_TESSERACT_LANGS"))
+	if override != "" {
+		return normalizeTesseractLangSpec(override)
+	}
+
+	available := installedTesseractLanguages()
+	if len(available) == 0 {
+		return ""
+	}
+
+	preferred := []string{"eng", "nld", "ron", "spa", "fra", "deu", "ita", "por", "pol", "tur"}
+	seen := map[string]bool{}
+	var picks []string
+	for _, lang := range preferred {
+		if containsString(available, lang) && !seen[lang] {
+			seen[lang] = true
+			picks = append(picks, lang)
+		}
+	}
+	if len(picks) > 0 {
+		return strings.Join(picks, "+")
+	}
+	for _, lang := range available {
+		if lang == "" || lang == "osd" {
+			continue
+		}
+		return lang
+	}
+	return ""
+}
+
+func installedTesseractLanguages() []string {
+	cmd := exec.Command("tesseract", "--list-langs")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var langs []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "List of available languages") || line == "osd" {
+			continue
+		}
+		if !seen[line] {
+			seen[line] = true
+			langs = append(langs, line)
+		}
+	}
+	return langs
+}
+
+func normalizeTesseractLangSpec(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	raw = strings.NewReplacer(",", "+", " ", "+", ";", "+").Replace(raw)
+	parts := strings.Split(raw, "+")
+	seen := map[string]bool{}
+	var cleaned []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "osd" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		cleaned = append(cleaned, part)
+	}
+	return strings.Join(cleaned, "+")
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func isUsefulPDFText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < 20 {
+		return false
+	}
+	words := len(strings.Fields(trimmed))
+	if words >= 8 {
+		return true
+	}
+	letters := 0
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			letters++
+		}
+	}
+	return letters >= 20
 }
 
 type WriteFileTool struct {

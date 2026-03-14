@@ -12,9 +12,12 @@ import (
 
 // AgentRegistry manages multiple agent instances and routes messages to them.
 type AgentRegistry struct {
-	agents   map[string]*AgentInstance
-	resolver *routing.RouteResolver
-	mu       sync.RWMutex
+	agents        map[string]*AgentInstance
+	profileAgents map[string]*AgentInstance
+	resolver      *routing.RouteResolver
+	cfg           *config.Config
+	provider      providers.LLMProvider
+	mu            sync.RWMutex
 }
 
 // NewAgentRegistry creates a registry from config, instantiating all agents.
@@ -23,8 +26,11 @@ func NewAgentRegistry(
 	provider providers.LLMProvider,
 ) *AgentRegistry {
 	registry := &AgentRegistry{
-		agents:   make(map[string]*AgentInstance),
-		resolver: routing.NewRouteResolver(cfg),
+		agents:        make(map[string]*AgentInstance),
+		profileAgents: make(map[string]*AgentInstance),
+		resolver:      routing.NewRouteResolver(cfg),
+		cfg:           cfg,
+		provider:      provider,
 	}
 
 	agentConfigs := cfg.Agents.List
@@ -108,6 +114,11 @@ func (r *AgentRegistry) ForEachTool(name string, fn func(tools.Tool)) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, agent := range r.agents {
+		if t, ok := agent.Tools.Get(name); ok {
+			fn(t)
+		}
+	}
+	for _, agent := range r.profileAgents {
 		if t, ok := agent.Tools.Get(name); ok {
 			fn(t)
 		}

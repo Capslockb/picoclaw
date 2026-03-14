@@ -120,3 +120,45 @@ func resolveMediaRefs(messages []providers.Message, store media.MediaStore, maxS
 
 	return result
 }
+
+// buildAttachmentContext builds explicit text context for attachments so
+// non-inlineable files (for example PDFs) remain visible to the model.
+func buildAttachmentContext(refs []string, store media.MediaStore) string {
+	if len(refs) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, "media://") && store != nil {
+			localPath, meta, err := store.ResolveWithMeta(ref)
+			if err == nil {
+				name := strings.TrimSpace(meta.Filename)
+				if name == "" {
+					name = "attachment"
+				}
+				mime := strings.TrimSpace(meta.ContentType)
+				detail := "- " + name
+				if mime != "" {
+					detail += " (" + mime + ")"
+				}
+				detail += " [ref: " + ref + "]"
+				if strings.TrimSpace(localPath) != "" {
+					detail += " [local_path: " + localPath + "]"
+				}
+				lines = append(lines, detail)
+				continue
+			}
+		}
+		lines = append(lines, "- "+ref)
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return "Attached files in this turn:\n" + strings.Join(lines, "\n") + "\n\n" +
+		"Attachment handling rules:\n" +
+		"- If an attachment is listed, do not ask the user for a file path.\n" +
+		"- Use local_path or ref from this list when reading/processing files."
+}

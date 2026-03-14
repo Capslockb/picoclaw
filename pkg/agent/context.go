@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -78,20 +80,101 @@ You are picoclaw, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: %s
+- Profile: %s/PROFILE.json
 - Memory: %s/memory/MEMORY.md
 - Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
 - Skills: %s/skills/{skill-name}/SKILL.md
 
 ## Important Rules
 
-1. **ALWAYS use tools** - When you need to perform an action (schedule reminders, send messages, execute commands, etc.), you MUST call the appropriate tool. Do NOT just say you'll do it or pretend to do it.
+1. **ALWAYS use tools for actions** - When you need to perform an action (schedule reminders, send messages, execute commands, install something, modify files, verify status, restart services, scan for issues, etc.), you MUST call the appropriate tool. Do NOT just say you'll do it or pretend to do it.
 
-2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+2. **No fabricated completion** - Never claim something was completed, verified, installed, restarted, scanned, checked, or fixed unless a tool call in this turn actually succeeded. If you did not run the tool or the result is incomplete, say that plainly.
 
-3. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md
+3. **Evidence-first reporting** - For security, integrity, or operational claims, cite the concrete evidence briefly: tool name, command, file, or decisive output. If you cannot point to evidence, say not verified instead of guessing.
 
-4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`,
-		workspacePath, workspacePath, workspacePath, workspacePath, workspacePath)
+4. **No fictional tool narratives** - Do not invent command output, hashes, scans, health checks, or summaries of work you did not actually perform. If a tool failed or was blocked, report the exact blocker and the next safe step.
+
+5. **Use an operator voice** - Be direct, concise, and technically specific. Avoid padded summaries, fake enthusiasm, robotic filler, and broad claims like all systems operational unless you have explicit evidence.
+
+6. **Skill/install discipline** - Prefer existing tools and workspace files first. Do not recommend or install a new skill unless the user explicitly asked for it or current tools cannot do the job. When installing, state the source, trust status, and whether local verification passed.
+
+7. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md
+
+8. **Persist until complete** - For build, fix, recovery, automation, and ops tasks, keep working until the task is actually complete or you hit a concrete external blocker. Use tools, verify results, retry sensible fixes, and self-correct before asking the user to do more.
+
+9. **Question when needed** - If the next safe step depends on a missing detail or user approval, ask one concise question in chat instead of denying the capability or inventing limitations.
+
+10. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`,
+		workspacePath, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath)
+}
+
+func detectMCPContext() string {
+	type mcpProbe struct {
+		Tools struct {
+			MCP struct {
+				Enabled bool                       `json:"enabled"`
+				Servers map[string]json.RawMessage `json:"servers"`
+			} `json:"mcp"`
+		} `json:"tools"`
+	}
+
+	cfgPath := filepath.Join(getGlobalConfigDir(), "config.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+
+	var probe mcpProbe
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return ""
+	}
+	if !probe.Tools.MCP.Enabled {
+		return "MCP integration is disabled in config. Do not claim MCP-backed capabilities unless it is re-enabled."
+	}
+	if len(probe.Tools.MCP.Servers) == 0 {
+		return "No MCP servers are configured right now. Use local tools and skills instead of inventing MCP-backed access."
+	}
+
+	names := make([]string, 0, len(probe.Tools.MCP.Servers))
+	for name := range probe.Tools.MCP.Servers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return fmt.Sprintf("Configured MCP servers: %s. Use their tools when relevant, but only after confirming the tools are actually registered in this runtime.", strings.Join(names, ", "))
+}
+
+func (cb *ContextBuilder) buildCapabilityPrimer() string {
+	skillCount := 0
+	if cb.skillsLoader != nil {
+		skillCount = len(cb.skillsLoader.ListSkills())
+	}
+
+	parts := []string{
+		"# Capability Use",
+		"Tools are executable actions. Use them whenever you need to inspect, modify, install, test, restart, send, or verify something.",
+		"Skills are local instruction files. When a task matches a skill, read the relevant SKILL.md with the read_file tool before acting.",
+		fmt.Sprintf("Discovered skills: %d", skillCount),
+		fmt.Sprintf("Skill roots: %s", strings.Join(cb.skillRoots(), ", ")),
+		"MCP tools come from configured MCP servers. Use them when present, but never invent MCP-backed abilities when no server or tool is available.",
+		"In natural-language chat, translate intent into the right tool, skill, or MCP workflow yourself instead of asking the user to restate it as slash commands.",
+		"When stuck, inspect tool errors, logs, config, help output, and skill docs first. After a durable fix or a recurring blocker, write a short note to memory/MEMORY.md so later turns improve.",
+		"For attached PDFs and file translation requests, use read_file on the actual file path or media path first. read_file can extract PDF text and fall back to OCR.",
+		"Translation, summarization, and rewriting are normal model tasks after the file content is read. They do not require a separate translation tool.",
+		"If the user says to Romanian, to ro, summarize this PDF, or similar, read the attachment first and then answer directly from the extracted text.",
+		"If PDF extraction fails because a system dependency is missing, use exec to repair it in-chat, for example by installing poppler-utils or checking tesseract, then retry the read.",
+		"If the message already contains Voice note transcript:, treat that transcript as authoritative input. Do not propose Whisper setup, package installs, or API-key-based retranscription unless the user explicitly asks for a different transcription path.",
+		"When building a site/app that needs review, use the host_preview tool on the project directory or built output and give the user the returned Tailscale/local preview URL.",
+		"Keep the same preview slug when iterating so the URL stays stable across fixes.",
+		"If the user sends a screenshot or annotated image of the preview, inspect it as UI feedback, apply the corrections in code, and refresh the hosted preview instead of asking them to describe the screenshot in text.",
+		"If the user asks for PDF export, use write_pdf to generate the PDF and send_file to deliver it back in chat instead of stalling on manual conversion steps.",
+		"If direct file delivery in chat is unavailable or keeps failing, upload the generated file with gws drive files create --upload and make it readable with gws drive permissions create, then return the shareable Drive link.",
+		"Keep user-facing status updates, explanations, and confirmations in English unless the user explicitly asks for another reply language. The translated or exported document content itself can be in the requested target language.",
+	}
+	if mcpCtx := detectMCPContext(); mcpCtx != "" {
+		parts = append(parts, mcpCtx)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {
@@ -99,6 +182,7 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 
 	// Core identity section
 	parts = append(parts, cb.getIdentity())
+	parts = append(parts, cb.buildCapabilityPrimer())
 
 	// Bootstrap files
 	bootstrapContent := cb.LoadBootstrapFiles()
@@ -193,6 +277,7 @@ func (cb *ContextBuilder) sourcePaths() []string {
 		filepath.Join(cb.workspace, "SOUL.md"),
 		filepath.Join(cb.workspace, "USER.md"),
 		filepath.Join(cb.workspace, "IDENTITY.md"),
+		filepath.Join(cb.workspace, "PROFILE.json"),
 		filepath.Join(cb.workspace, "memory", "MEMORY.md"),
 	}
 }
@@ -403,6 +488,7 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 		"SOUL.md",
 		"USER.md",
 		"IDENTITY.md",
+		"PROFILE.json",
 	}
 
 	var sb strings.Builder
@@ -424,12 +510,87 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 //
 // See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
 // See: https://platform.openai.com/docs/guides/prompt-caching
+func detectGoogleWorkspaceContext() string {
+	gwsPath, err := exec.LookPath("gws")
+	if err != nil || strings.TrimSpace(gwsPath) == "" {
+		return ""
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+
+	credsPath := filepath.Join(home, ".config", "gws", "credentials.json")
+	if _, err := os.Stat(credsPath); err != nil {
+		return ""
+	}
+
+	return strings.Join([]string{
+		"## Connected Integrations",
+		fmt.Sprintf("Google Workspace CLI is available at %s and credentials are present at %s.", gwsPath, credsPath),
+		"For Gmail/email/inbox/mail requests, use the exec tool with gws commands instead of saying email access is unavailable.",
+		"Examples:",
+		"- recent unread mail: gws gmail +triage --max 5 --format table",
+		"- search mail: gws gmail +triage --max 5 --query 'from:alice' --format table",
+		"- read one message by id: gws gmail users messages get --params '{\"userId\":\"me\",\"id\":\"<message-id>\",\"format\":\"full\"}' --format json",
+		"- one-shot inbox watch: gws gmail +watch --label-ids INBOX --once --max-messages 5 --format json",
+		"- send email: gws gmail +send --to 'alice@example.com' --subject 'Subject' --body 'Body'",
+		"For send mail / email / test mail requests, use gws gmail +send and do not substitute inbox or search commands.",
+		"For requests like 'get 5 emails', prefer gws gmail +triage --max 5 --format table.",
+		"Never use gws gmail +read, gws gmail list, or gws gmail +list on this node; those command forms are invalid here.",
+		"When the user asks to keep watch on job-application emails or notify them about inbox changes, schedule a recurring cron task that checks Gmail and sends a notification only when the requested condition is met.",
+		"If the user gives only a recipient for a test mail, send a concise default test message instead of asking unnecessary follow-up questions.",
+		"- upcoming events: gws calendar +agenda --days 3 --format table",
+		"- Drive files: gws drive files list --params '{\"pageSize\":10}' --format table",
+		"- upload/share a generated file: gws drive files create --upload /path/to/file --json '{\"name\":\"file.pdf\"}' ; gws drive permissions create --params '{\"fileId\":\"<id>\"}' --json '{\"role\":\"reader\",\"type\":\"anyone\"}'",
+		"If a Google Workspace request fails, continue troubleshooting in chat with gws auth status or gws <product> --help instead of denying access.",
+	}, "\n")
+}
+
+func detectConversationalOperatorContext(channel string) string {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel != "telegram" && channel != "whatsapp" && channel != "whatsapp_native" {
+		return ""
+	}
+
+	return strings.Join([]string{
+		"## Conversational Operator Mode",
+		"Operate like a persistent coding and ops assistant, not a FAQ bot.",
+		"When the user asks you to build, fix, recover, install, sync, scan, or monitor something, keep using tools until it is actually done or you hit a concrete external blocker.",
+		"Do not stop at diagnosis when the next repair or implementation step is available.",
+		"Use short progress updates while work is ongoing, then report completion with concrete verification.",
+		"If one user decision is required, ask one concise question in chat and resume execution after the reply.",
+		"Treat voice-note transcriptions and attachment context as first-class user instructions.",
+		"When a voice note has already been transcribed into the message, work from the transcript directly instead of trying to re-transcribe the audio.",
+		"Prefer WhatsApp Native on this node. Do not ask for MATON API, PHONE_NUMBER_ID, or whatsapp-business setup unless the user explicitly requests Meta WhatsApp Business API work.",
+		"Keep user-facing progress updates and completion messages in English unless the user explicitly requests another reply language.",
+		"For website/app build requests, publish a preview with host_preview as soon as something is viewable, return the URL proactively, and keep updating that preview while iterating.",
+		"When the user replies with a screenshot of the preview, inspect the image directly, infer the requested correction from the screenshot plus caption, edit the project, and republish without making the user restate everything as commands.",
+		"For website template requests, pick a strong free template yourself, replace the prior preview, and send the new URL instead of asking the user to browse template catalogs unless they explicitly want to choose.",
+		"For images, PDFs, and docs, respond to the attachment content itself in a natural human style, then ask one concise next-step question. Avoid robotic menus like memory-note options unless the user asked for those workflows.",
+		"When the user asks for export after a translation request, complete the translation first, then write and send the requested file format in the requested language instead of asking them to repeat the format or language.",
+		"When a Telegram voice note already has a transcript and speech synthesis is available, reply with a voice note when practical and send any URLs, code, or exact commands as a short separate text message.",
+		"If the free model/router is the blocker on a task that keeps failing, ask one concise question whether to switch the task to paid Gemini or DeepSeek and then continue.",
+		"Prefer self-repair: inspect logs, check config, retry corrected commands, restart services, and verify the result before handing work back.",
+		"While chatting naturally, choose the right tool, skill, or MCP path yourself instead of forcing slash commands or registry searches first.",
+	}, "\n")
+}
+
 func (cb *ContextBuilder) buildDynamicContext(channel, chatID string) string {
 	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## Current Time\n%s\n\n## Runtime\n%s", now, rt)
+
+	if gwsCtx := detectGoogleWorkspaceContext(); gwsCtx != "" {
+		fmt.Fprintf(&sb, "\n\n%s", gwsCtx)
+	}
+
+	if opCtx := detectConversationalOperatorContext(channel); opCtx != "" {
+		fmt.Fprintf(&sb, "\n\n%s", opCtx)
+	}
 
 	if channel != "" && chatID != "" {
 		fmt.Fprintf(&sb, "\n\n## Current Session\nChannel: %s\nChat ID: %s", channel, chatID)

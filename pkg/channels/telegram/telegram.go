@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -26,16 +28,17 @@ import (
 )
 
 var (
-	reHeading    = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
-	reBlockquote = regexp.MustCompile(`^>\s*(.*)$`)
-	reLink       = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	reBoldStar   = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reBoldUnder  = regexp.MustCompile(`__(.+?)__`)
-	reItalic     = regexp.MustCompile(`_([^_]+)_`)
-	reStrike     = regexp.MustCompile(`~~(.+?)~~`)
-	reListItem   = regexp.MustCompile(`^[-*]\s+`)
-	reCodeBlock  = regexp.MustCompile("```[\\w]*\\n?([\\s\\S]*?)```")
-	reInlineCode = regexp.MustCompile("`([^`]+)`")
+	reHeading        = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	reBlockquote     = regexp.MustCompile(`(?m)^>\s*(.*)$`)
+	reLink           = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	reBoldItalicStar = regexp.MustCompile(`\*\*\*(.+?)\*\*\*`)
+	reBoldStar       = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reBoldUnder      = regexp.MustCompile(`__(.+?)__`)
+	reItalic         = regexp.MustCompile(`_([^_]+)_`)
+	reStrike         = regexp.MustCompile(`~~(.+?)~~`)
+	reListItem       = regexp.MustCompile(`(?m)^[-*]\s+`)
+	reCodeBlock      = regexp.MustCompile("```[\\w]*\\n?([\\s\\S]*?)```")
+	reInlineCode     = regexp.MustCompile("`([^`]+)`")
 )
 
 type TelegramChannel struct {
@@ -46,6 +49,11 @@ type TelegramChannel struct {
 	chatIDs map[string]int64
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	mediaMu             sync.Mutex
+	lastMediaRefByChat  map[string]string
+	lastMediaNameByChat map[string]string
+	lastMediaSeenByChat map[string]time.Time
 
 	registerFunc     func(context.Context, []commands.Definition) error
 	commandRegCancel context.CancelFunc
@@ -94,10 +102,13 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 	)
 
 	return &TelegramChannel{
-		BaseChannel: base,
-		bot:         bot,
-		config:      cfg,
-		chatIDs:     make(map[string]int64),
+		BaseChannel:         base,
+		bot:                 bot,
+		config:              cfg,
+		chatIDs:             make(map[string]int64),
+		lastMediaRefByChat:  make(map[string]string),
+		lastMediaNameByChat: make(map[string]string),
+		lastMediaSeenByChat: make(map[string]time.Time),
 	}, nil
 }
 
@@ -185,6 +196,12 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		chunk := queue[0]
 		queue = queue[1:]
 
+		logger.InfoCF("telegram", "Outbound text", map[string]any{
+			"chat_id":     msg.ChatID,
+			"content_len": len(chunk),
+			"preview":     utils.Truncate(chunk, 160),
+		})
+
 		htmlContent := markdownToTelegramHTML(chunk)
 
 		if len([]rune(htmlContent)) > 4096 {
@@ -232,6 +249,11 @@ func (c *TelegramChannel) sendHTMLChunk(ctx context.Context, chatID int64, htmlC
 // (Telegram's typing indicator expires after ~5s) in a background goroutine.
 // The returned stop function is idempotent and cancels the goroutine.
 func (c *TelegramChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
+	// Respect channel-level typing config; disabled means no-op.
+	if !c.config.Channels.Telegram.Typing.Enabled {
+		return func() {}, nil
+	}
+
 	cid, err := parseChatID(chatID)
 	if err != nil {
 		return func() {}, err
@@ -327,6 +349,13 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 			continue
 		}
 
+		logger.InfoCF("telegram", "Outbound media", map[string]any{
+			"chat_id":    msg.ChatID,
+			"type":       part.Type,
+			"caption":    utils.Truncate(part.Caption, 160),
+			"local_path": localPath,
+		})
+
 		file, err := os.Open(localPath)
 		if err != nil {
 			logger.ErrorCF("telegram", "Failed to open media file", map[string]any{
@@ -351,6 +380,13 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 				Caption: part.Caption,
 			}
 			_, err = c.bot.SendAudio(ctx, params)
+		case "voice":
+			params := &telego.SendVoiceParams{
+				ChatID:  tu.ID(chatID),
+				Voice:   telego.InputFile{File: file},
+				Caption: part.Caption,
+			}
+			_, err = c.bot.SendVoice(ctx, params)
 		case "video":
 			params := &telego.SendVideoParams{
 				ChatID:  tu.ID(chatID),
@@ -419,18 +455,25 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	scope := channels.BuildMediaScope("telegram", chatIDStr, messageIDStr)
 
 	// Helper to register a local file with the media store
-	storeMedia := func(localPath, filename string) string {
+	storeMedia := func(localPath string, meta media.MediaMeta) string {
+		if strings.TrimSpace(meta.Filename) == "" {
+			meta.Filename = filepath.Base(localPath)
+		}
+		if strings.TrimSpace(meta.Source) == "" {
+			meta.Source = "telegram"
+		}
+
 		if store := c.GetMediaStore(); store != nil {
-			ref, err := store.Store(localPath, media.MediaMeta{
-				Filename: filename,
-				Source:   "telegram",
-			}, scope)
+			ref, err := store.Store(localPath, meta, scope)
 			if err == nil {
 				return ref
 			}
+			logger.WarnCF("telegram", "Failed to store media in media store", map[string]any{"error": err.Error()})
 		}
 		return localPath // fallback: use raw path
 	}
+
+	lastMediaName := ""
 
 	if message.Text != "" {
 		content += message.Text
@@ -447,7 +490,8 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		photo := message.Photo[len(message.Photo)-1]
 		photoPath := c.downloadPhoto(ctx, photo.FileID)
 		if photoPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(photoPath, "photo.jpg"))
+			mediaPaths = append(mediaPaths, storeMedia(photoPath, media.MediaMeta{Filename: "photo.jpg", ContentType: "image/jpeg", Source: "telegram"}))
+			lastMediaName = "photo.jpg"
 			if content != "" {
 				content += "\n"
 			}
@@ -458,7 +502,8 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	if message.Voice != nil {
 		voicePath := c.downloadFile(ctx, message.Voice.FileID, ".ogg")
 		if voicePath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(voicePath, "voice.ogg"))
+			mediaPaths = append(mediaPaths, storeMedia(voicePath, media.MediaMeta{Filename: "voice.ogg", ContentType: "audio/ogg", Source: "telegram"}))
+			lastMediaName = "voice.ogg"
 
 			if content != "" {
 				content += "\n"
@@ -470,7 +515,8 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	if message.Audio != nil {
 		audioPath := c.downloadFile(ctx, message.Audio.FileID, ".mp3")
 		if audioPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(audioPath, "audio.mp3"))
+			mediaPaths = append(mediaPaths, storeMedia(audioPath, media.MediaMeta{Filename: "audio.mp3", ContentType: "audio/mpeg", Source: "telegram"}))
+			lastMediaName = "audio.mp3"
 			if content != "" {
 				content += "\n"
 			}
@@ -478,14 +524,99 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		}
 	}
 
-	if message.Document != nil {
-		docPath := c.downloadFile(ctx, message.Document.FileID, "")
-		if docPath != "" {
-			mediaPaths = append(mediaPaths, storeMedia(docPath, "document"))
+	if message.Video != nil {
+		videoType := strings.TrimSpace(message.Video.MimeType)
+		videoExt := ".mp4"
+		if strings.Contains(strings.ToLower(videoType), "webm") {
+			videoExt = ".webm"
+		}
+		videoPath := c.downloadFile(ctx, message.Video.FileID, videoExt)
+		if videoPath != "" {
+			if videoType == "" {
+				videoType = "video/mp4"
+			}
+			videoName := "video" + videoExt
+			mediaPaths = append(mediaPaths, storeMedia(videoPath, media.MediaMeta{Filename: videoName, ContentType: videoType, Source: "telegram"}))
+			lastMediaName = videoName
 			if content != "" {
 				content += "\n"
 			}
-			content += "[file]"
+			content += "[video]"
+		}
+	}
+
+	if message.VideoNote != nil {
+		videoNotePath := c.downloadFile(ctx, message.VideoNote.FileID, ".mp4")
+		if videoNotePath != "" {
+			mediaPaths = append(mediaPaths, storeMedia(videoNotePath, media.MediaMeta{Filename: "video-note.mp4", ContentType: "video/mp4", Source: "telegram"}))
+			lastMediaName = "video-note.mp4"
+			if content != "" {
+				content += "\n"
+			}
+			content += "[video note]"
+		}
+	}
+
+	if message.Animation != nil {
+		animationType := strings.TrimSpace(message.Animation.MimeType)
+		animationExt := ".mp4"
+		switch {
+		case strings.Contains(strings.ToLower(animationType), "gif"):
+			animationExt = ".gif"
+		case strings.Contains(strings.ToLower(animationType), "webm"):
+			animationExt = ".webm"
+		}
+		animationPath := c.downloadFile(ctx, message.Animation.FileID, animationExt)
+		if animationPath != "" {
+			if animationType == "" {
+				animationType = "video/mp4"
+			}
+			animationName := "animation" + animationExt
+			mediaPaths = append(mediaPaths, storeMedia(animationPath, media.MediaMeta{Filename: animationName, ContentType: animationType, Source: "telegram"}))
+			lastMediaName = animationName
+			if content != "" {
+				content += "\n"
+			}
+			content += "[animation]"
+		}
+	}
+
+	if message.Document != nil {
+		docPath := c.downloadFile(ctx, message.Document.FileID, "")
+		if docPath != "" {
+			docName := strings.TrimSpace(message.Document.FileName)
+			if docName == "" {
+				docName = filepath.Base(docPath)
+			}
+			docType := strings.TrimSpace(message.Document.MimeType)
+			mediaPaths = append(mediaPaths, storeMedia(docPath, media.MediaMeta{Filename: docName, ContentType: docType, Source: "telegram"}))
+			lastMediaName = docName
+			if content != "" {
+				content += "\n"
+			}
+			content += "[file: " + docName + "]"
+		}
+	}
+
+	if len(mediaPaths) == 0 && shouldReuseRecentAttachment(content) {
+		if ref, name, ok := c.recallRecentMedia(chatIDStr, 30*time.Minute); ok {
+			mediaPaths = append(mediaPaths, ref)
+			if strings.TrimSpace(name) != "" {
+				content += "\n[file: " + name + "]"
+			} else {
+				content += "\n[file: attachment]"
+			}
+			lastMediaName = name
+		}
+	}
+
+	if len(mediaPaths) > 0 {
+		c.rememberRecentMedia(chatIDStr, mediaPaths[len(mediaPaths)-1], lastMediaName)
+		if wantsRomanianTranslation(content) {
+			content += "\n[task: translate attached file to Romanian directly after reading it]"
+			if wantsPDFReturn(content) {
+				content += "\n[task: return the translated result as a PDF file]"
+			}
 		}
 	}
 
@@ -506,6 +637,13 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		content = cleaned
 	}
 
+	logger.InfoCF("telegram", "Inbound message", map[string]any{
+		"sender_id":   sender.CanonicalID,
+		"chat_id":     fmt.Sprintf("%d", chatID),
+		"message_id":  messageIDStr,
+		"media_count": len(mediaPaths),
+		"preview":     utils.Truncate(content, 160),
+	})
 	logger.DebugCF("telegram", "Received message", map[string]any{
 		"sender_id": sender.CanonicalID,
 		"chat_id":   fmt.Sprintf("%d", chatID),
@@ -525,10 +663,24 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	messageID := fmt.Sprintf("%d", message.MessageID)
 
 	metadata := map[string]string{
-		"user_id":    fmt.Sprintf("%d", user.ID),
-		"username":   user.Username,
-		"first_name": user.FirstName,
-		"is_group":   fmt.Sprintf("%t", message.Chat.Type != "private"),
+		"user_id":          fmt.Sprintf("%d", user.ID),
+		"username":         user.Username,
+		"first_name":       user.FirstName,
+		"is_group":         fmt.Sprintf("%t", message.Chat.Type != "private"),
+		"user_profile_key": sender.CanonicalID,
+	}
+
+	if adminBody, adminRequested := parseAdminEscalation(content, c.botUsername()); adminRequested {
+		if !c.isAdminUser(platformID) {
+			return c.sendPlainText(ctx, chatID, "Admin escalation denied for this Telegram account.")
+		}
+		if strings.TrimSpace(adminBody) == "" {
+			return c.sendPlainText(ctx, chatID, "Usage: /admin <instruction>")
+		}
+		content = adminBody
+		metadata["admin_escalated"] = "true"
+		metadata["admin_user_id"] = platformID
+		metadata["admin_user"] = sender.CanonicalID
 	}
 
 	c.HandleMessage(c.ctx,
@@ -542,6 +694,61 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		sender,
 	)
 	return nil
+}
+
+func (c *TelegramChannel) isAdminUser(userID string) bool {
+	for _, allowed := range c.config.Channels.Telegram.AdminIDs {
+		if strings.TrimSpace(allowed) == strings.TrimSpace(userID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *TelegramChannel) botUsername() string {
+	if c == nil || c.bot == nil {
+		return ""
+	}
+	return c.bot.Username()
+}
+
+func parseAdminEscalation(content, botUsername string) (string, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case lower == "/admin":
+		return "", true
+	case strings.HasPrefix(lower, "/admin "):
+		return strings.TrimSpace(trimmed[len("/admin "):]), true
+	case botUsername != "" && (lower == strings.ToLower("/admin@"+botUsername)):
+		return "", true
+	case botUsername != "" && strings.HasPrefix(lower, strings.ToLower("/admin@"+botUsername+" ")):
+		prefixLen := len("/admin@" + botUsername + " ")
+		return strings.TrimSpace(trimmed[prefixLen:]), true
+	case lower == "!admin":
+		return "", true
+	case strings.HasPrefix(lower, "!admin "):
+		return strings.TrimSpace(trimmed[len("!admin "):]), true
+	default:
+		return "", false
+	}
+}
+
+func (c *TelegramChannel) sendPlainText(ctx context.Context, chatID int64, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	logger.InfoCF("telegram", "Outbound text", map[string]any{
+		"chat_id":     fmt.Sprintf("%d", chatID),
+		"content_len": len(text),
+		"preview":     utils.Truncate(text, 160),
+	})
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), text))
+	return err
 }
 
 func (c *TelegramChannel) downloadPhoto(ctx context.Context, fileID string) string {
@@ -608,6 +815,8 @@ func markdownToTelegramHTML(text string) string {
 
 	text = reLink.ReplaceAllString(text, `<a href="$2">$1</a>`)
 
+	text = reBoldItalicStar.ReplaceAllString(text, "<b><i>$1</i></b>")
+
 	text = reBoldStar.ReplaceAllString(text, "<b>$1</b>")
 
 	text = reBoldUnder.ReplaceAllString(text, "<b>$1</b>")
@@ -619,6 +828,8 @@ func markdownToTelegramHTML(text string) string {
 		}
 		return "<i>" + match[1] + "</i>"
 	})
+
+	text = replaceSingleAsteriskItalics(text)
 
 	text = reStrike.ReplaceAllString(text, "<s>$1</s>")
 
@@ -692,6 +903,53 @@ func escapeHTML(text string) string {
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	return text
+}
+
+func replaceSingleAsteriskItalics(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+
+	for i := 0; i < len(text); {
+		if text[i] != '*' || (i+1 < len(text) && text[i+1] == '*') {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		closeIdx := -1
+		for j := i + 1; j < len(text); j++ {
+			if text[j] == '\n' {
+				break
+			}
+			if text[j] != '*' {
+				continue
+			}
+			if j+1 < len(text) && text[j+1] == '*' {
+				continue
+			}
+			closeIdx = j
+			break
+		}
+		if closeIdx == -1 {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		content := text[i+1 : closeIdx]
+		if strings.TrimSpace(content) == "" {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		b.WriteString("<i>")
+		b.WriteString(content)
+		b.WriteString("</i>")
+		i = closeIdx + 1
+	}
+
+	return b.String()
 }
 
 // isBotMentioned checks if the bot is mentioned in the message via entities.
@@ -781,4 +1039,76 @@ func (c *TelegramChannel) stripBotMention(content string) string {
 	re := regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(botUsername))
 	content = re.ReplaceAllString(content, "")
 	return strings.TrimSpace(content)
+}
+
+func shouldReuseRecentAttachment(content string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(content))
+	if trimmed == "" {
+		return false
+	}
+
+	if trimmed == "to ro" || trimmed == "to romanian" || trimmed == "into romanian" {
+		return true
+	}
+
+	if strings.Contains(trimmed, "romanian") || strings.Contains(trimmed, "to ro") {
+		return len(strings.Fields(trimmed)) <= 8
+	}
+
+	return false
+}
+
+func wantsRomanianTranslation(content string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(content))
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "to ro") || strings.Contains(trimmed, "romanian")
+}
+
+func wantsPDFReturn(content string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(content))
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "send back as pdf") || strings.Contains(trimmed, "as pdf") || strings.Contains(trimmed, "pdf export")
+}
+
+func (c *TelegramChannel) rememberRecentMedia(chatID, mediaRef, mediaName string) {
+	if strings.TrimSpace(chatID) == "" || strings.TrimSpace(mediaRef) == "" {
+		return
+	}
+
+	c.mediaMu.Lock()
+	defer c.mediaMu.Unlock()
+
+	c.lastMediaRefByChat[chatID] = mediaRef
+	c.lastMediaNameByChat[chatID] = mediaName
+	c.lastMediaSeenByChat[chatID] = time.Now()
+}
+
+func (c *TelegramChannel) recallRecentMedia(chatID string, ttl time.Duration) (string, string, bool) {
+	if strings.TrimSpace(chatID) == "" {
+		return "", "", false
+	}
+
+	c.mediaMu.Lock()
+	defer c.mediaMu.Unlock()
+
+	seenAt, ok := c.lastMediaSeenByChat[chatID]
+	if !ok {
+		return "", "", false
+	}
+	if ttl > 0 && time.Since(seenAt) > ttl {
+		delete(c.lastMediaRefByChat, chatID)
+		delete(c.lastMediaNameByChat, chatID)
+		delete(c.lastMediaSeenByChat, chatID)
+		return "", "", false
+	}
+
+	ref := c.lastMediaRefByChat[chatID]
+	if strings.TrimSpace(ref) == "" {
+		return "", "", false
+	}
+	return ref, c.lastMediaNameByChat[chatID], true
 }

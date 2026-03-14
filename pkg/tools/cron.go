@@ -205,14 +205,14 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 		t.cronService.UpdateJob(job)
 	}
 
-	return SilentResult(fmt.Sprintf("Cron job added: %s (id: %s)", job.Name, job.ID))
+	return UserResult(fmt.Sprintf("Reminder scheduled: %s (id: %s)", job.Name, job.ID))
 }
 
 func (t *CronTool) listJobs() *ToolResult {
 	jobs := t.cronService.ListJobs(false)
 
 	if len(jobs) == 0 {
-		return SilentResult("No scheduled jobs")
+		return UserResult("No scheduled jobs")
 	}
 
 	var result strings.Builder
@@ -231,7 +231,7 @@ func (t *CronTool) listJobs() *ToolResult {
 		result.WriteString(fmt.Sprintf("- %s (id: %s, %s)\n", j.Name, j.ID, scheduleInfo))
 	}
 
-	return SilentResult(result.String())
+	return UserResult(result.String())
 }
 
 func (t *CronTool) removeJob(args map[string]any) *ToolResult {
@@ -241,7 +241,7 @@ func (t *CronTool) removeJob(args map[string]any) *ToolResult {
 	}
 
 	if t.cronService.RemoveJob(jobID) {
-		return SilentResult(fmt.Sprintf("Cron job removed: %s", jobID))
+		return UserResult(fmt.Sprintf("Scheduled job removed: %s", jobID))
 	}
 	return ErrorResult(fmt.Sprintf("Job %s not found", jobID))
 }
@@ -261,7 +261,7 @@ func (t *CronTool) enableJob(args map[string]any, enable bool) *ToolResult {
 	if !enable {
 		status = "disabled"
 	}
-	return SilentResult(fmt.Sprintf("Cron job '%s' %s", job.Name, status))
+	return UserResult(fmt.Sprintf("Scheduled job '%s' %s", job.Name, status))
 }
 
 // ExecuteJob executes a cron job through the agent

@@ -444,5 +444,15 @@ func parseJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
-	return types.NewJID(s, types.DefaultUserServer), nil
+	var digits strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	clean := digits.String()
+	if clean == "" {
+		return types.JID{}, fmt.Errorf("invalid chat id %q", s)
+	}
+	return types.NewJID(clean, types.DefaultUserServer), nil
 }

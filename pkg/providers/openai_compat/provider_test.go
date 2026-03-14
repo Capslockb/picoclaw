@@ -15,6 +15,13 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
 )
 
+func TestNormalizeModel_StripsGeminiPrefixForGeminiAPI(t *testing.T) {
+	got := normalizeModel("gemini/gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta")
+	if got != "gemini-2.5-flash" {
+		t.Fatalf("normalizeModel() = %q, want %q", got, "gemini-2.5-flash")
+	}
+}
+
 func TestProviderChat_UsesMaxCompletionTokensForGLM(t *testing.T) {
 	var requestBody map[string]any
 
@@ -105,6 +112,49 @@ func TestProviderChat_ParsesToolCalls(t *testing.T) {
 	}
 	if out.ToolCalls[0].Arguments["city"] != "SF" {
 		t.Fatalf("ToolCalls[0].Arguments[city] = %v, want SF", out.ToolCalls[0].Arguments["city"])
+	}
+}
+
+func TestProviderChat_SalvagesMalformedToolCallArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]any{
+						"content": "",
+						"tool_calls": []map[string]any{
+							{
+								"id":   "call_1",
+								"type": "function",
+								"function": map[string]any{
+									"name":      "read_file",
+									"arguments": "{\"path\": \"/\"tmp/picoclaw_media/photo.jpgtmp/picoclaw_media/photo.jpg\"}{\"path\": \"/tmp/picoclaw_media/photo.jpg\"}",
+								},
+							},
+						},
+					},
+					"finish_reason": "tool_calls",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "read img"}}, nil, "gpt-4o", nil)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if len(out.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(out.ToolCalls))
+	}
+	if out.ToolCalls[0].Arguments["path"] != "/tmp/picoclaw_media/photo.jpg" {
+		t.Fatalf("ToolCalls[0].Arguments[path] = %v, want /tmp/picoclaw_media/photo.jpg", out.ToolCalls[0].Arguments["path"])
+	}
+	if _, ok := out.ToolCalls[0].Arguments["raw"]; ok {
+		t.Fatalf("unexpected raw field after salvage: %v", out.ToolCalls[0].Arguments["raw"])
 	}
 }
 

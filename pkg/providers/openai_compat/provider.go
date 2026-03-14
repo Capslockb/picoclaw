@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -100,6 +101,71 @@ func NewProviderWithMaxTokensFieldAndTimeout(
 		WithMaxTokensField(maxTokensField),
 		WithRequestTimeout(time.Duration(requestTimeoutSeconds)*time.Second),
 	)
+}
+
+var simpleToolArgPattern = regexp.MustCompile(`"([A-Za-z0-9_]+)"\s*:\s*"((?:\\.|[^"])*)`)
+
+func salvageToolCallArguments(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil && parsed != nil {
+		return parsed
+	}
+
+	for start := len(raw) - 1; start >= 0; start-- {
+		if raw[start] != '{' {
+			continue
+		}
+		for end := len(raw); end > start; end-- {
+			if raw[end-1] != '}' {
+				continue
+			}
+			candidate := strings.TrimSpace(raw[start:end])
+			if candidate == "" {
+				continue
+			}
+			parsed = nil
+			if err := json.Unmarshal([]byte(candidate), &parsed); err == nil && parsed != nil {
+				return parsed
+			}
+		}
+	}
+
+	if salvaged := salvageLooseStringArguments(raw); len(salvaged) > 0 {
+		return salvaged
+	}
+	return nil
+}
+
+func salvageLooseStringArguments(raw string) map[string]any {
+	allowed := map[string]bool{
+		"path": true, "entry": true, "slug": true, "filename": true,
+		"content": true, "channel": true, "chat_id": true,
+		"url": true, "query": true, "command": true,
+		"oldpath": true, "newpath": true, "subject": true,
+		"body": true, "to": true,
+	}
+	out := map[string]any{}
+	for _, match := range simpleToolArgPattern.FindAllStringSubmatch(raw, -1) {
+		if len(match) < 3 || !allowed[match[1]] {
+			continue
+		}
+		value := match[2]
+		var decoded string
+		if err := json.Unmarshal([]byte("\""+value+"\""), &decoded); err == nil {
+			out[match[1]] = strings.TrimSpace(decoded)
+			continue
+		}
+		out[match[1]] = strings.TrimSpace(strings.ReplaceAll(value, `\"`, `"`))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (p *Provider) Chat(
@@ -326,7 +392,12 @@ func parseResponse(body io.Reader) (*LLMResponse, error) {
 			if tc.Function.Arguments != "" {
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &arguments); err != nil {
 					log.Printf("openai_compat: failed to decode tool call arguments for %q: %v", name, err)
-					arguments["raw"] = tc.Function.Arguments
+					if salvaged := salvageToolCallArguments(tc.Function.Arguments); salvaged != nil {
+						arguments = salvaged
+						log.Printf("openai_compat: salvaged malformed tool call arguments for %q", name)
+					} else {
+						arguments["raw"] = tc.Function.Arguments
+					}
 				}
 			}
 		}
@@ -439,7 +510,7 @@ func normalizeModel(model, apiBase string) string {
 
 	prefix := strings.ToLower(before)
 	switch prefix {
-	case "litellm", "moonshot", "nvidia", "groq", "ollama", "deepseek", "google",
+	case "litellm", "moonshot", "nvidia", "groq", "ollama", "deepseek", "google", "gemini",
 		"openrouter", "zhipu", "mistral", "vivgrid", "minimax":
 		return after
 	default:

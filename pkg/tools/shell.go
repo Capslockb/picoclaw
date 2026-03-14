@@ -91,6 +91,11 @@ var (
 		"/dev/stdout":  true,
 		"/dev/stderr":  true,
 	}
+
+	gwsGmailListPattern = regexp.MustCompile(`(?i)\bgws\s+gmail\s+(?:\+?list)\b`)
+	gwsGmailReadPattern = regexp.MustCompile(`(?i)\bgws\s+gmail\s+\+read\b`)
+	gwsIDFlagPattern    = regexp.MustCompile(`(?i)--id\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))`)
+	gwsFormatPattern    = regexp.MustCompile(`(?i)--format\s+([a-z]+)`)
 )
 
 func NewExecTool(workingDir string, restrict bool) (*ExecTool, error) {
@@ -201,11 +206,13 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 		return ErrorResult(guardError)
 	}
 
+	command, effectiveTimeout := normalizeCommandForExecution(command, t.timeout)
+
 	// timeout == 0 means no timeout
 	var cmdCtx context.Context
 	var cancel context.CancelFunc
-	if t.timeout > 0 {
-		cmdCtx, cancel = context.WithTimeout(ctx, t.timeout)
+	if effectiveTimeout > 0 {
+		cmdCtx, cancel = context.WithTimeout(ctx, effectiveTimeout)
 	} else {
 		cmdCtx, cancel = context.WithCancel(ctx)
 	}
@@ -258,7 +265,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 
 	if err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
-			msg := fmt.Sprintf("Command timed out after %v", t.timeout)
+			msg := fmt.Sprintf("Command timed out after %v", effectiveTimeout)
 			return &ToolResult{
 				ForLLM:  msg,
 				ForUser: msg,
@@ -292,6 +299,75 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	}
 }
 
+func normalizeCommandForExecution(command string, timeout time.Duration) (string, time.Duration) {
+	if runtime.GOOS == "windows" {
+		return command, timeout
+	}
+
+	command, timeout = normalizeKnownGWSCommandAliases(command, timeout)
+
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return command, timeout
+	}
+
+	aptPattern := regexp.MustCompile(`(^|[;&|]\s*)(apt-get|apt)(\s+)`)
+	if !aptPattern.MatchString(trimmed) {
+		return command, timeout
+	}
+
+	normalized := aptPattern.ReplaceAllString(
+		command,
+		`${1}env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none apt-get -o APT::Sandbox::User=root -o Dpkg::Use-Pty=0 -o Acquire::Retries=3${3}`,
+	)
+
+	effectiveTimeout := timeout
+	if effectiveTimeout < 15*time.Minute {
+		effectiveTimeout = 15 * time.Minute
+	}
+
+	return normalized, effectiveTimeout
+}
+
+func normalizeKnownGWSCommandAliases(command string, timeout time.Duration) (string, time.Duration) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return command, timeout
+	}
+
+	if gwsGmailListPattern.MatchString(trimmed) {
+		return gwsGmailListPattern.ReplaceAllString(command, "gws gmail +triage"), timeout
+	}
+
+	if !gwsGmailReadPattern.MatchString(trimmed) {
+		return command, timeout
+	}
+
+	matches := gwsIDFlagPattern.FindStringSubmatch(command)
+	var messageID string
+	for _, candidate := range matches[1:] {
+		if strings.TrimSpace(candidate) != "" {
+			messageID = strings.TrimSpace(candidate)
+			break
+		}
+	}
+	if messageID == "" {
+		return command, timeout
+	}
+
+	outputFormat := "json"
+	if formatMatches := gwsFormatPattern.FindStringSubmatch(command); len(formatMatches) == 2 {
+		outputFormat = strings.TrimSpace(formatMatches[1])
+		if outputFormat == "" {
+			outputFormat = "json"
+		}
+	}
+
+	params := fmt.Sprintf(`{"userId":"me","id":%q,"format":"full"}`, messageID)
+	normalized := fmt.Sprintf("gws gmail users messages get --params '%s' --format %s", params, outputFormat)
+	return normalized, timeout
+}
+
 func (t *ExecTool) guardCommand(command, cwd string) string {
 	cmd := strings.TrimSpace(command)
 	lower := strings.ToLower(cmd)
@@ -305,11 +381,14 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		}
 	}
 
-	if !explicitlyAllowed {
-		for _, pattern := range t.denyPatterns {
-			if pattern.MatchString(lower) {
-				return "Command blocked by safety guard (dangerous pattern detected)"
-			}
+	if explicitlyAllowed {
+		// Explicitly allowlisted commands bypass all guard checks.
+		return ""
+	}
+
+	for _, pattern := range t.denyPatterns {
+		if pattern.MatchString(lower) {
+			return "Command blocked by safety guard (dangerous pattern detected)"
 		}
 	}
 

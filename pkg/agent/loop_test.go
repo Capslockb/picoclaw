@@ -1116,3 +1116,43 @@ func TestResolveMediaRefs_UsesMetaContentType(t *testing.T) {
 		t.Fatalf("expected jpeg prefix, got %q", result[0].Media[0][:30])
 	}
 }
+
+func TestMergeVoiceTranscriptions(t *testing.T) {
+	got := mergeVoiceTranscriptions("[voice]", []string{"build a landing page with a pricing section"})
+	want := "Voice note transcript: build a landing page with a pricing section"
+	if got != want {
+		t.Fatalf("mergeVoiceTranscriptions() = %q, want %q", got, want)
+	}
+
+	got = mergeVoiceTranscriptions("keep going\n[voice]", []string{"retrieve 5 of my emails"})
+	want = "keep going\nVoice note transcript: retrieve 5 of my emails"
+	if got != want {
+		t.Fatalf("mergeVoiceTranscriptions() mixed content = %q, want %q", got, want)
+	}
+}
+
+func TestBuildDynamicContextIncludesConversationalOperatorMode(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-context-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	ctx := cb.buildDynamicContext("telegram", "5533009291")
+	if !strings.Contains(ctx, "Conversational Operator Mode") {
+		t.Fatalf("expected conversational operator context, got %q", ctx)
+	}
+	if !strings.Contains(ctx, "Treat voice-note transcriptions") {
+		t.Fatalf("expected voice-note guidance, got %q", ctx)
+	}
+}
+
+func TestEffectiveConversationIterations(t *testing.T) {
+	if got := effectiveConversationIterations("telegram", 10); got != 14 {
+		t.Fatalf("telegram iterations = %d, want 14", got)
+	}
+	if got := effectiveConversationIterations("cli", 10); got != 10 {
+		t.Fatalf("cli iterations = %d, want 10", got)
+	}
+}

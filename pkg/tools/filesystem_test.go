@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -519,4 +520,56 @@ func TestWhitelistFs_AllowsMatchingPaths(t *testing.T) {
 	if !result.IsError {
 		t.Errorf("expected non-whitelisted path to be blocked, got: %s", result.ForLLM)
 	}
+}
+
+func TestFilesystemTool_ReadFile_PDFExtraction(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/pdftotext"); err != nil {
+		t.Skip("pdftotext not installed")
+	}
+
+	tmpDir := t.TempDir()
+	pdfPath := filepath.Join(tmpDir, "sample.pdf")
+	if err := writeMinimalTextPDF(pdfPath, "Hello PDF extraction test"); err != nil {
+		t.Fatalf("writeMinimalTextPDF: %v", err)
+	}
+
+	tool := NewReadFileTool("", false)
+	result := tool.Execute(context.Background(), map[string]any{"path": pdfPath})
+	if result.IsError {
+		t.Fatalf("expected successful PDF extraction, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "pdf text extracted via") {
+		t.Fatalf("expected extraction marker, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(strings.ToLower(result.ForLLM), "hello pdf extraction test") {
+		t.Fatalf("expected extracted text, got: %s", result.ForLLM)
+	}
+}
+
+func writeMinimalTextPDF(path, text string) error {
+	escaped := strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`).Replace(text)
+	stream := fmt.Sprintf("BT /F1 24 Tf 72 720 Td (%s) Tj ET", escaped)
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	}
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objects)+1)
+	for i, obj := range objects {
+		offsets[i+1] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, obj)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n", len(objects)+1)
+	b.WriteString("0000000000 65535 f \n")
+	for i := 1; i <= len(objects); i++ {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offsets[i])
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }

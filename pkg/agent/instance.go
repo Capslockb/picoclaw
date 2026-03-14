@@ -21,6 +21,7 @@ type AgentInstance struct {
 	ID                        string
 	Name                      string
 	Model                     string
+	ImageModel                string
 	Fallbacks                 []string
 	Workspace                 string
 	MaxIterations             int
@@ -37,6 +38,7 @@ type AgentInstance struct {
 	Subagents                 *config.SubagentsConfig
 	SkillsFilter              []string
 	Candidates                []providers.FallbackCandidate
+	ImageCandidates           []providers.FallbackCandidate
 
 	// Router is non-nil when model routing is configured and the light model
 	// was successfully resolved. It scores each incoming message and decides
@@ -92,6 +94,9 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("append_file") {
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
+	if cfg.Tools.IsToolEnabled("write_pdf") {
+		toolsRegistry.Register(tools.NewWritePDFTool(workspace, restrict))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
@@ -141,57 +146,15 @@ func NewAgentInstance(
 		summarizeTokenPercent = 75
 	}
 
-	// Resolve fallback candidates
-	modelCfg := providers.ModelConfig{
-		Primary:   model,
-		Fallbacks: fallbacks,
-	}
-	resolveFromModelList := func(raw string) (string, bool) {
-		ensureProtocol := func(model string) string {
-			model = strings.TrimSpace(model)
-			if model == "" {
-				return ""
-			}
-			if strings.Contains(model, "/") {
-				return model
-			}
-			return "openai/" + model
-		}
-
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			return "", false
-		}
-
-		if cfg != nil {
-			if mc, err := cfg.GetModelConfig(raw); err == nil && mc != nil && strings.TrimSpace(mc.Model) != "" {
-				return ensureProtocol(mc.Model), true
-			}
-
-			for i := range cfg.ModelList {
-				fullModel := strings.TrimSpace(cfg.ModelList[i].Model)
-				if fullModel == "" {
-					continue
-				}
-				if fullModel == raw {
-					return ensureProtocol(fullModel), true
-				}
-				_, modelID := providers.ExtractProtocol(fullModel)
-				if modelID == raw {
-					return ensureProtocol(fullModel), true
-				}
-			}
-		}
-
-		return "", false
-	}
-
-	candidates := providers.ResolveCandidatesWithLookup(modelCfg, defaults.Provider, resolveFromModelList)
+	candidates := resolveAgentCandidates(cfg, defaults.Provider, model, fallbacks)
+	imageModel := strings.TrimSpace(defaults.ImageModel)
+	imageCandidates := resolveAgentCandidates(cfg, defaults.Provider, imageModel, defaults.ImageModelFallbacks)
 
 	// Model routing setup: pre-resolve light model candidates at creation time
 	// to avoid repeated model_list lookups on every incoming message.
 	var router *routing.Router
 	var lightCandidates []providers.FallbackCandidate
+	resolveFromModelList := resolveModelLookup(cfg)
 	if rc := defaults.Routing; rc != nil && rc.Enabled && rc.LightModel != "" {
 		lightModelCfg := providers.ModelConfig{Primary: rc.LightModel}
 		resolved := providers.ResolveCandidatesWithLookup(lightModelCfg, defaults.Provider, resolveFromModelList)
@@ -211,6 +174,7 @@ func NewAgentInstance(
 		ID:                        agentID,
 		Name:                      agentName,
 		Model:                     model,
+		ImageModel:                imageModel,
 		Fallbacks:                 fallbacks,
 		Workspace:                 workspace,
 		MaxIterations:             maxIter,
@@ -227,8 +191,65 @@ func NewAgentInstance(
 		Subagents:                 subagents,
 		SkillsFilter:              skillsFilter,
 		Candidates:                candidates,
+		ImageCandidates:           imageCandidates,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
+	}
+}
+
+func resolveAgentCandidates(
+	cfg *config.Config,
+	defaultProvider string,
+	primary string,
+	fallbacks []string,
+) []providers.FallbackCandidate {
+	if strings.TrimSpace(primary) == "" {
+		return nil
+	}
+	modelCfg := providers.ModelConfig{
+		Primary:   primary,
+		Fallbacks: fallbacks,
+	}
+	return providers.ResolveCandidatesWithLookup(modelCfg, defaultProvider, resolveModelLookup(cfg))
+}
+
+func resolveModelLookup(cfg *config.Config) func(raw string) (string, bool) {
+	return func(raw string) (string, bool) {
+		ensureProtocol := func(model string) string {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				return ""
+			}
+			if strings.Contains(model, "/") {
+				return model
+			}
+			return "openai/" + model
+		}
+
+		raw = strings.TrimSpace(raw)
+		if raw == "" || cfg == nil {
+			return "", false
+		}
+
+		if mc, err := cfg.GetModelConfig(raw); err == nil && mc != nil && strings.TrimSpace(mc.Model) != "" {
+			return ensureProtocol(mc.Model), true
+		}
+
+		for i := range cfg.ModelList {
+			fullModel := strings.TrimSpace(cfg.ModelList[i].Model)
+			if fullModel == "" {
+				continue
+			}
+			if fullModel == raw {
+				return ensureProtocol(fullModel), true
+			}
+			protocol, modelID := providers.ExtractProtocol(fullModel)
+			if fullModel == raw || modelID == raw || protocol+"/"+modelID == raw {
+				return ensureProtocol(fullModel), true
+			}
+		}
+
+		return "", false
 	}
 }
 

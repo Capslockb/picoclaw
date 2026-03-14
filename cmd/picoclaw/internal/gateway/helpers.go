@@ -132,15 +132,34 @@ func gatewayCmd(debug bool) error {
 		mediaStore.Stop()
 		return fmt.Errorf("error creating channel manager: %w", err)
 	}
+	channelManager.SetControlPlaneDiagnoser(func(ctx context.Context, prompt string) (string, error) {
+		return agentLoop.ProcessHeartbeat(ctx, prompt, "cli", "direct")
+	})
 
 	// Inject channel manager and media store into agent loop
 	agentLoop.SetChannelManager(channelManager)
 	agentLoop.SetMediaStore(mediaStore)
 
+	previewRestrict := cfg.Agents.Defaults.RestrictToWorkspace && !cfg.Agents.Defaults.AllowReadOutsideWorkspace
+	agentLoop.RegisterPerAgentTool(func(agentID string, instance *agent.AgentInstance) tools.Tool {
+		_ = agentID
+		return tools.NewHostPreviewTool(instance.Workspace, previewRestrict, func(root, entry, slug string) (*tools.HostedPreview, error) {
+			actualSlug, tailscaleURL, localURL, err := channelManager.PublishPreview(root, entry, slug)
+			if err != nil {
+				return nil, err
+			}
+			return &tools.HostedPreview{Slug: actualSlug, Root: root, Entry: entry, TailscaleURL: tailscaleURL, LocalURL: localURL}, nil
+		})
+	})
+
 	// Wire up voice transcription if a supported provider is configured.
 	if transcriber := voice.DetectTranscriber(cfg); transcriber != nil {
 		agentLoop.SetTranscriber(transcriber)
 		logger.InfoCF("voice", "Transcription enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
+	}
+	if synthesizer := voice.DetectSynthesizer(cfg); synthesizer != nil {
+		agentLoop.SetSynthesizer(synthesizer)
+		logger.InfoCF("voice", "Speech synthesis enabled (agent-level)", map[string]any{"provider": synthesizer.Name()})
 	}
 
 	enabledChannels := channelManager.GetEnabledChannels()
@@ -188,6 +207,8 @@ func gatewayCmd(debug bool) error {
 		return err
 	}
 
+	// Shared HTTP server mode never calls health.Server.Start(), so mark readiness explicitly.
+	healthServer.SetReady(true)
 	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
 
 	go agentLoop.Run(ctx)

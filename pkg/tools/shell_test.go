@@ -212,6 +212,55 @@ func TestShellTool_StderrCapture(t *testing.T) {
 	}
 }
 
+func TestNormalizeCommandForExecution_AptGetsRootSandboxOverride(t *testing.T) {
+	command, timeout := normalizeCommandForExecution("apt-get update && apt install -y poppler-utils", 60*time.Second)
+	if !strings.Contains(command, "APT::Sandbox::User=root") {
+		t.Fatalf("normalized apt command missing sandbox override: %s", command)
+	}
+	if strings.Contains(command, "&& apt install") {
+		t.Fatalf("expected apt install to be normalized too: %s", command)
+	}
+	if timeout < 15*time.Minute {
+		t.Fatalf("expected extended timeout for apt command, got %v", timeout)
+	}
+}
+
+func TestNormalizeCommandForExecution_NonAptUnchanged(t *testing.T) {
+	command, timeout := normalizeCommandForExecution("echo hello", 45*time.Second)
+	if command != "echo hello" {
+		t.Fatalf("unexpected command rewrite: %s", command)
+	}
+	if timeout != 45*time.Second {
+		t.Fatalf("unexpected timeout rewrite: %v", timeout)
+	}
+}
+
+func TestNormalizeCommandForExecution_GWSListAlias(t *testing.T) {
+	command, timeout := normalizeCommandForExecution("gws gmail list --max 5 --format table", 45*time.Second)
+	if !strings.Contains(command, "gws gmail +triage --max 5 --format table") {
+		t.Fatalf("expected gmail list alias to normalize to +triage, got: %s", command)
+	}
+	if timeout != 45*time.Second {
+		t.Fatalf("unexpected timeout rewrite: %v", timeout)
+	}
+}
+
+func TestNormalizeCommandForExecution_GWSReadAlias(t *testing.T) {
+	command, timeout := normalizeCommandForExecution("gws gmail +read --id 19ceb978d4dfdfc6 --format table", 45*time.Second)
+	if !strings.Contains(command, "gws gmail users messages get") {
+		t.Fatalf("expected gmail +read alias to normalize to users messages get, got: %s", command)
+	}
+	if !strings.Contains(command, `"id":"19ceb978d4dfdfc6"`) {
+		t.Fatalf("expected normalized params to include message id, got: %s", command)
+	}
+	if !strings.Contains(command, "--format table") {
+		t.Fatalf("expected output format to be preserved, got: %s", command)
+	}
+	if timeout != 45*time.Second {
+		t.Fatalf("unexpected timeout rewrite: %v", timeout)
+	}
+}
+
 // TestShellTool_OutputTruncation verifies long output is truncated
 func TestShellTool_OutputTruncation(t *testing.T) {
 	tool, err := NewExecTool("", false)
