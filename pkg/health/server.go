@@ -16,6 +16,39 @@ type Server struct {
 	ready     bool
 	checks    map[string]Check
 	startTime time.Time
+	metrics   *Metrics
+}
+
+type Metrics struct {
+	mu           sync.RWMutex
+	Counters     map[string]int64   `json:"counters"`
+	Latencies    map[string][]int64 `json:"latencies_ms"`
+	LastUpdate   time.Time          `json:"last_update"`
+}
+
+var (
+	DefaultMetrics = &Metrics{
+		Counters:  make(map[string]int64),
+		Latencies: make(map[string][]int64),
+	}
+)
+
+func (m *Metrics) RecordCounter(name string, val int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Counters[name] += val
+	m.LastUpdate = time.Now()
+}
+
+func (m *Metrics) RecordLatency(name string, ms int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Latencies[name] = append(m.Latencies[name], ms)
+	// Keep only last 100 samples
+	if len(m.Latencies[name]) > 100 {
+		m.Latencies[name] = m.Latencies[name][len(m.Latencies[name])-100:]
+	}
+	m.LastUpdate = time.Now()
 }
 
 type Check struct {
@@ -41,6 +74,7 @@ func NewServer(host string, port int) *Server {
 
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ready", s.readyHandler)
+	mux.HandleFunc("/metrics", s.metricsHandler)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	s.server = &http.Server{
@@ -115,6 +149,16 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	DefaultMetrics.mu.RLock()
+	defer DefaultMetrics.mu.RUnlock()
+
+	json.NewEncoder(w).Encode(DefaultMetrics)
 }
 
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {

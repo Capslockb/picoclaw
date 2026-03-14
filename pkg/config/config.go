@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/go-playground/validator/v10"
 
 	"github.com/sipeed/picoclaw/pkg/fileutil"
 )
@@ -130,11 +131,11 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 }
 
 type AgentConfig struct {
-	ID        string            `json:"id"`
+	ID        string            `json:"id" validate:"required"`
 	Default   bool              `json:"default,omitempty"`
 	Name      string            `json:"name,omitempty"`
 	Workspace string            `json:"workspace,omitempty"`
-	Model     *AgentModelConfig `json:"model,omitempty"`
+	Model     *AgentModelConfig `json:"model,omitempty" validate:"required"`
 	Skills    []string          `json:"skills,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
 }
@@ -189,9 +190,9 @@ type AgentDefaults struct {
 	ModelFallbacks            []string       `json:"model_fallbacks,omitempty"`
 	ImageModel                string         `json:"image_model,omitempty"           env:"PICOCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
 	ImageModelFallbacks       []string       `json:"image_model_fallbacks,omitempty"`
-	MaxTokens                 int            `json:"max_tokens"                      env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature               *float64       `json:"temperature,omitempty"           env:"PICOCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations         int            `json:"max_tool_iterations"             env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxTokens                 int            `json:"max_tokens"                      env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOKENS"           validate:"gt=0"`
+	Temperature               *float64       `json:"temperature,omitempty"           env:"PICOCLAW_AGENTS_DEFAULTS_TEMPERATURE"          validate:"omitempty,gte=0,lte=2"`
+	MaxToolIterations         int            `json:"max_tool_iterations"             env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"     validate:"gte=1,lte=100"`
 	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"PICOCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
 	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"PICOCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
 	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
@@ -579,8 +580,21 @@ type GatewayConfig struct {
 	Port int    `json:"port" env:"PICOCLAW_GATEWAY_PORT"`
 }
 
+type ToolDiscoveryConfig struct {
+	Enabled          bool `json:"enabled"            env:"PICOCLAW_TOOLS_DISCOVERY_ENABLED"`
+	TTL              int  `json:"ttl"                env:"PICOCLAW_TOOLS_DISCOVERY_TTL"`
+	MaxSearchResults int  `json:"max_search_results" env:"PICOCLAW_MAX_SEARCH_RESULTS"`
+	UseBM25          bool `json:"use_bm25"           env:"PICOCLAW_TOOLS_DISCOVERY_USE_BM25"`
+	UseRegex         bool `json:"use_regex"          env:"PICOCLAW_TOOLS_DISCOVERY_USE_REGEX"`
+}
+
 type ToolConfig struct {
 	Enabled bool `json:"enabled" env:"ENABLED"`
+}
+
+type ReadFileToolConfig struct {
+	Enabled bool
+	MaxReadFileSize int
 }
 
 type BraveConfig struct {
@@ -594,6 +608,18 @@ type TavilyConfig struct {
 	APIKey     string `json:"api_key"     env:"PICOCLAW_TOOLS_WEB_TAVILY_API_KEY"`
 	BaseURL    string `json:"base_url"    env:"PICOCLAW_TOOLS_WEB_TAVILY_BASE_URL"`
 	MaxResults int    `json:"max_results" env:"PICOCLAW_TOOLS_WEB_TAVILY_MAX_RESULTS"`
+}
+
+type ElevenLabsConfig struct {
+	Enabled bool   `json:"enabled" env:"PICOCLAW_TOOLS_VOICE_ELEVENLABS_ENABLED"`
+	APIKey  string `json:"api_key" env:"PICOCLAW_TOOLS_VOICE_ELEVENLABS_API_KEY"`
+	VoiceID string `json:"voice_id" env:"PICOCLAW_TOOLS_VOICE_ELEVENLABS_VOICE_ID"`
+}
+
+type InteractionConfig struct {
+	WritingStyle     string `json:"writing_style"     env:"PICOCLAW_INTERACTION_WRITING_STYLE"`
+	AutoReplyEnabled bool   `json:"autoreply_enabled" env:"PICOCLAW_INTERACTION_AUTOREPLY_ENABLED"`
+	ApprovalRequired bool   `json:"approval_required" env:"PICOCLAW_INTERACTION_APPROVAL_REQUIRED"`
 }
 
 type DuckDuckGoConfig struct {
@@ -650,6 +676,12 @@ type ExecConfig struct {
 	TimeoutSeconds      int      `                                 env:"PICOCLAW_TOOLS_EXEC_TIMEOUT_SECONDS"       json:"timeout_seconds"` // 0 means use default (60s)
 }
 
+type VPSConfig struct {
+	ToolConfig `envPrefix:"PICOCLAW_TOOLS_VPS_"`
+	Host       string `json:"host"     env:"PICOCLAW_TOOLS_VPS_HOST"`
+	User       string `json:"user"     env:"PICOCLAW_TOOLS_VPS_USER"`
+}
+
 type SkillsToolsConfig struct {
 	ToolConfig            `                       envPrefix:"PICOCLAW_TOOLS_SKILLS_"`
 	Registries            SkillsRegistriesConfig `                                   json:"registries"`
@@ -661,6 +693,12 @@ type MediaCleanupConfig struct {
 	ToolConfig `    envPrefix:"PICOCLAW_MEDIA_CLEANUP_"`
 	MaxAge     int `                                    env:"PICOCLAW_MEDIA_CLEANUP_MAX_AGE"  json:"max_age_minutes"`
 	Interval   int `                                    env:"PICOCLAW_MEDIA_CLEANUP_INTERVAL" json:"interval_minutes"`
+}
+
+type ProactiveConfig struct {
+	Enabled                bool `json:"enabled"                   env:"PICOCLAW_PROACTIVE_ENABLED"`
+	SyncIntervalMinutes    int  `json:"sync_interval_minutes"     env:"PICOCLAW_PROACTIVE_SYNC_INTERVAL"`
+	ProcessIntervalMinutes int  `json:"process_interval_minutes"  env:"PICOCLAW_PROACTIVE_PROCESS_INTERVAL"`
 }
 
 type ToolsConfig struct {
@@ -676,16 +714,25 @@ type ToolsConfig struct {
 	EditFile        ToolConfig         `json:"edit_file"                                                envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
 	FindSkills      ToolConfig         `json:"find_skills"                                              envPrefix:"PICOCLAW_TOOLS_FIND_SKILLS_"`
 	I2C             ToolConfig         `json:"i2c"                                                      envPrefix:"PICOCLAW_TOOLS_I2C_"`
+	Browser         ToolConfig         `json:"browser"                                                  envPrefix:"PICOCLAW_TOOLS_BROWSER_"`
+	Image           ToolConfig         `json:"image"                                                    envPrefix:"PICOCLAW_TOOLS_IMAGE_"`
 	InstallSkill    ToolConfig         `json:"install_skill"                                            envPrefix:"PICOCLAW_TOOLS_INSTALL_SKILL_"`
+	Google          ToolConfig         `json:"google"                                                   envPrefix:"PICOCLAW_TOOLS_GOOGLE_"`
 	ListDir         ToolConfig         `json:"list_dir"                                                 envPrefix:"PICOCLAW_TOOLS_LIST_DIR_"`
 	Message         ToolConfig         `json:"message"                                                  envPrefix:"PICOCLAW_TOOLS_MESSAGE_"`
-	ReadFile        ToolConfig         `json:"read_file"                                                envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
+	ReadFile        ReadFileToolConfig `json:"read_file"                                                envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
+	PDF             ToolConfig         `json:"pdf"                                                      envPrefix:"PICOCLAW_TOOLS_PDF_"`
 	SendFile        ToolConfig         `json:"send_file"                                                envPrefix:"PICOCLAW_TOOLS_SEND_FILE_"`
 	Spawn           ToolConfig         `json:"spawn"                                                    envPrefix:"PICOCLAW_TOOLS_SPAWN_"`
 	SPI             ToolConfig         `json:"spi"                                                      envPrefix:"PICOCLAW_TOOLS_SPI_"`
 	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
 	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
+	VPS             VPSConfig          `json:"vps"                                                      envPrefix:"PICOCLAW_TOOLS_VPS_"`
+	VoiceCall       ToolConfig         `json:"voice_call"                                               envPrefix:"PICOCLAW_TOOLS_VOICECALL_"`
 	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	Proactive       ProactiveConfig    `json:"proactive"`
+	ElevenLabs      ElevenLabsConfig   `json:"elevenlabs"`
+	Interaction     InteractionConfig  `json:"interaction"`
 }
 
 type SearchCacheConfig struct {
@@ -731,7 +778,8 @@ type MCPServerConfig struct {
 
 // MCPConfig defines configuration for all MCP servers
 type MCPConfig struct {
-	ToolConfig `envPrefix:"PICOCLAW_TOOLS_MCP_"`
+	ToolConfig `                    envPrefix:"PICOCLAW_TOOLS_MCP_"`
+	Discovery  ToolDiscoveryConfig `                                json:"discovery"`
 	// Servers is a map of server name to server configuration
 	Servers map[string]MCPServerConfig `json:"servers,omitempty"`
 }
@@ -767,6 +815,11 @@ func LoadConfig(path string) (*Config, error) {
 
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(cfg); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Migrate legacy channel config fields to new unified structures
@@ -938,14 +991,24 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.FindSkills.Enabled
 	case "i2c":
 		return t.I2C.Enabled
+	case "browser":
+		return t.Browser.Enabled
+	case "image":
+		return t.Image.Enabled
 	case "install_skill":
 		return t.InstallSkill.Enabled
+	case "google":
+		return t.Google.Enabled
+	case "vps":
+		return t.VPS.Enabled
 	case "list_dir":
 		return t.ListDir.Enabled
 	case "message":
 		return t.Message.Enabled
 	case "read_file":
 		return t.ReadFile.Enabled
+	case "pdf":
+		return t.PDF.Enabled
 	case "spawn":
 		return t.Spawn.Enabled
 	case "spi":

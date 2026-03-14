@@ -174,6 +174,22 @@ type clawhubModerationInfo struct {
 	IsSuspicious     bool `json:"isSuspicious"`
 }
 
+type clawhubDetailsResponse struct {
+	Slug          string                 `json:"slug"`
+	DisplayName   string                 `json:"displayName"`
+	Summary       string                 `json:"summary"`
+	Description   string                 `json:"description"`
+	Version       string                 `json:"version"`
+	Author        string                 `json:"author"`
+	Homepage      string                 `json:"homepage"`
+	Repository    string                 `json:"repository"`
+	License       string                 `json:"license"`
+	Moderation    *clawhubModerationInfo `json:"moderation"`
+	Files         []string               `json:"files"`
+	Tools         []string               `json:"tools"`
+	Permissions   []string               `json:"permissions"`
+}
+
 func (c *ClawHubRegistry) GetSkillMeta(ctx context.Context, slug string) (*SkillMeta, error) {
 	if err := utils.ValidateSkillIdentifier(slug); err != nil {
 		return nil, fmt.Errorf("invalid slug %q: error: %s", slug, err.Error())
@@ -207,6 +223,60 @@ func (c *ClawHubRegistry) GetSkillMeta(ctx context.Context, slug string) (*Skill
 	}
 
 	return meta, nil
+}
+
+func (c *ClawHubRegistry) Inspect(ctx context.Context, slug string) (*SkillDetails, error) {
+	if err := utils.ValidateSkillIdentifier(slug); err != nil {
+		return nil, fmt.Errorf("invalid slug %q: error: %s", slug, err.Error())
+	}
+
+	// Assuming inspection endpoint is /api/v1/skills/{slug}/inspect or similar
+	u := c.baseURL + c.skillsPath + "/" + url.PathEscape(slug) + "/inspect"
+
+	body, err := c.doGet(ctx, u)
+	if err != nil {
+		// Fallback to basic metadata if inspection endpoint is not available
+		basicMeta, basicErr := c.GetSkillMeta(ctx, slug)
+		if basicErr != nil {
+			return nil, fmt.Errorf("skill inspection failed: %w", err)
+		}
+		return &SkillDetails{
+			Slug:             basicMeta.Slug,
+			DisplayName:      basicMeta.DisplayName,
+			Summary:          basicMeta.Summary,
+			IsMalwareBlocked: basicMeta.IsMalwareBlocked,
+			IsSuspicious:     basicMeta.IsSuspicious,
+			RegistryName:     c.Name(),
+		}, nil
+	}
+
+	var resp clawhubDetailsResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse skill inspection details: %w", err)
+	}
+
+	details := &SkillDetails{
+		Slug:             resp.Slug,
+		DisplayName:      resp.DisplayName,
+		Summary:          resp.Summary,
+		Description:      resp.Description,
+		Version:          resp.Version,
+		Author:           resp.Author,
+		Homepage:         resp.Homepage,
+		Repository:       resp.Repository,
+		License:          resp.License,
+		Files:            resp.Files,
+		Tools:            resp.Tools,
+		Permissions:      resp.Permissions,
+		RegistryName:     c.Name(),
+	}
+
+	if resp.Moderation != nil {
+		details.IsMalwareBlocked = resp.Moderation.IsMalwareBlocked
+		details.IsSuspicious = resp.Moderation.IsSuspicious
+	}
+
+	return details, nil
 }
 
 // --- DownloadAndInstall ---

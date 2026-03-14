@@ -28,4 +28,7 @@ type Runtime struct {
 	ExecuteShell       func(ctx context.Context, command string) (string, error)
 	GetRecentPreviews  func() []PreviewInfo
 	ClearHistory       func() error
+	GetChannel         func(name string) (any, bool)
+	GetVersion         func() string
+	ListTools          func() []string
 }

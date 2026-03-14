@@ -33,6 +33,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/identity"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -59,6 +60,7 @@ type WhatsAppNativeChannel struct {
 	reconnecting bool
 	stopping     atomic.Bool    // set once Stop begins; prevents new wg.Add calls
 	wg           sync.WaitGroup // tracks background goroutines (QR handler, reconnect)
+	lastQR       string         // stores the last QR code string for retrieval
 }
 
 // NewWhatsAppNativeChannel creates a WhatsApp channel that uses whatsmeow for connection.
@@ -187,6 +189,9 @@ func (c *WhatsAppNativeChannel) Start(ctx context.Context) error {
 					}
 					if evt.Event == "code" {
 						logger.InfoCF("whatsapp", "Scan this QR code with WhatsApp (Linked Devices):", nil)
+						c.mu.Lock()
+						c.lastQR = evt.Code
+						c.mu.Unlock()
 						qrterminal.GenerateWithConfig(evt.Code, qrterminal.Config{
 							Level:      qrterminal.L,
 							Writer:     os.Stdout,
@@ -352,11 +357,49 @@ func (c *WhatsAppNativeChannel) handleIncoming(evt *events.Message) {
 	}
 	content = utils.SanitizeMessageContent(content)
 
-	if content == "" {
-		return
-	}
-
 	var mediaPaths []string
+
+	// Handle media (Audio/Voice messages)
+	if evt.Message.AudioMessage != nil {
+		audio := evt.Message.AudioMessage
+		data, err := c.client.Download(audio)
+		if err != nil {
+			logger.WarnCF("whatsapp", "Failed to download audio", map[string]any{"error": err.Error()})
+		} else {
+			ext := ".ogg" // Default for WhatsApp voice notes
+			if audio.GetMimetype() == "audio/mp4" {
+				ext = ".m4a"
+			}
+			filename := fmt.Sprintf("audio-%s%s", evt.Info.ID, ext)
+			tempPath := filepath.Join(os.TempDir(), filename)
+			if err := os.WriteFile(tempPath, data, 0o644); err != nil {
+				logger.WarnCF("whatsapp", "Failed to save audio file", map[string]any{"error": err.Error()})
+			} else {
+				scope := channels.BuildMediaScope("whatsapp", chatID, evt.Info.ID)
+				if store := c.GetMediaStore(); store != nil {
+					ref, err := store.Store(tempPath, media.MediaMeta{
+						Filename:    filename,
+						ContentType: audio.GetMimetype(),
+						Source:      "whatsapp",
+					}, scope)
+					if err == nil {
+						mediaPaths = append(mediaPaths, ref)
+						if content != "" {
+							content += "\n"
+						}
+						// Mark for transcription in AgentLoop
+						if audio.GetPtt() {
+							content += "[voice]"
+						} else {
+							content += "[audio]"
+						}
+					} else {
+						mediaPaths = append(mediaPaths, tempPath)
+					}
+				}
+			}
+		}
+	}
 
 	metadata := make(map[string]string)
 	metadata["message_id"] = evt.Info.ID
@@ -455,4 +498,70 @@ func parseJID(s string) (types.JID, error) {
 		return types.JID{}, fmt.Errorf("invalid chat id %q", s)
 	}
 	return types.NewJID(clean, types.DefaultUserServer), nil
+}
+
+func (c *WhatsAppNativeChannel) GetLastQR() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastQR
+}
+
+func (c *WhatsAppNativeChannel) FetchHistory(ctx context.Context, chatID string, limit int) ([]bus.InboundMessage, error) {
+	if !c.IsRunning() {
+		return nil, channels.ErrNotRunning
+	}
+
+	jid, err := parseJID(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat id %q: %w", chatID, err)
+	}
+
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("whatsapp client not initialized")
+	}
+
+	// Fetch messages from WhatsApp servers/local store
+	resp, err := client.FetchMessages(jid, limit, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("whatsapp fetch history: %w", err)
+	}
+
+	messages := make([]bus.InboundMessage, 0, len(resp.Messages))
+	for _, m := range resp.Messages {
+		if m.Message == nil {
+			continue
+		}
+
+		content := m.Message.GetConversation()
+		if content == "" && m.Message.ExtendedTextMessage != nil {
+			content = m.Message.ExtendedTextMessage.GetText()
+		}
+		if content == "" {
+			continue
+		}
+
+		senderID := m.Info.Sender.String()
+		peerKind := "direct"
+		if m.Info.Chat.Server == types.GroupServer {
+			peerKind = "group"
+		}
+
+		messages = append(messages, bus.InboundMessage{
+			Channel:  "whatsapp",
+			SenderID: senderID,
+			ChatID:   m.Info.Chat.String(),
+			Content:  content,
+			Peer: bus.Peer{
+				Kind: peerKind,
+				ID:   m.Info.Chat.String(),
+			},
+			Timestamp: m.Info.Timestamp,
+		})
+	}
+
+	return messages, nil
 }

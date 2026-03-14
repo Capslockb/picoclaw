@@ -21,8 +21,9 @@ import (
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
 type MemoryStore struct {
 	workspace  string
-	memoryDir  string
-	memoryFile string
+	memoryDir      string
+	memoryFile     string
+	commsFile      string
 }
 
 // NewMemoryStore creates a new MemoryStore with the given workspace path.
@@ -30,6 +31,7 @@ type MemoryStore struct {
 func NewMemoryStore(workspace string) *MemoryStore {
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	commsFile := filepath.Join(memoryDir, "COMMUNICATIONS.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
@@ -38,6 +40,7 @@ func NewMemoryStore(workspace string) *MemoryStore {
 		workspace:  workspace,
 		memoryDir:  memoryDir,
 		memoryFile: memoryFile,
+		commsFile:  commsFile,
 	}
 }
 
@@ -63,6 +66,38 @@ func (ms *MemoryStore) WriteLongTerm(content string) error {
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	// Using 0o600 (owner read/write only) for secure default permissions.
 	return fileutil.WriteFileAtomic(ms.memoryFile, []byte(content), 0o600)
+}
+
+// ReadCommunications reads the communications memory (COMMUNICATIONS.md).
+func (ms *MemoryStore) ReadCommunications() string {
+	if data, err := os.ReadFile(ms.commsFile); err == nil {
+		return string(data)
+	}
+	return ""
+}
+
+// WriteCommunications writes content to the communications memory file.
+func (ms *MemoryStore) WriteCommunications(content string) error {
+	return fileutil.WriteFileAtomic(ms.commsFile, []byte(content), 0o600)
+}
+
+// AppendCommunications appends content to the communications memory file.
+func (ms *MemoryStore) AppendCommunications(content string) error {
+	existing := ""
+	if data, err := os.ReadFile(ms.commsFile); err == nil {
+		existing = string(data)
+	}
+
+	trimmed := ""
+	if len(existing) > 0 {
+		// Keep only last 20KB to avoid excessive context
+		if len(existing) > 20000 {
+			existing = existing[len(existing)-20000:]
+		}
+		trimmed = existing + "\n\n---\n\n"
+	}
+
+	return fileutil.WriteFileAtomic(ms.commsFile, []byte(trimmed+content), 0o600)
 }
 
 // ReadToday reads today's daily note.
@@ -134,8 +169,9 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 func (ms *MemoryStore) GetMemoryContext() string {
 	longTerm := ms.ReadLongTerm()
 	recentNotes := ms.GetRecentDailyNotes(3)
+	comms := ms.ReadCommunications()
 
-	if longTerm == "" && recentNotes == "" {
+	if longTerm == "" && recentNotes == "" && comms == "" {
 		return ""
 	}
 
@@ -146,8 +182,16 @@ func (ms *MemoryStore) GetMemoryContext() string {
 		sb.WriteString(longTerm)
 	}
 
+	if comms != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n---\n\n")
+		}
+		sb.WriteString("## Recent Communications\n\n")
+		sb.WriteString(comms)
+	}
+
 	if recentNotes != "" {
-		if longTerm != "" {
+		if sb.Len() > 0 {
 			sb.WriteString("\n\n---\n\n")
 		}
 		sb.WriteString("## Recent Daily Notes\n\n")

@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 
+	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/commands"
 )
 
@@ -49,4 +50,15 @@ type PlaceholderRecorder interface {
 // Channels that do not support platform-level command menus can ignore it.
 type CommandRegistrarCapable interface {
 	RegisterCommands(ctx context.Context, defs []commands.Definition) error
+}
+
+// QRProvider is implemented by channels that can provide a QR code string
+// (e.g. for WhatsApp pairing).
+type QRProvider interface {
+	GetLastQR() string
+}
+
+// HistoryProvider is implemented by channels that can fetch message history.
+type HistoryProvider interface {
+	FetchHistory(ctx context.Context, chatID string, limit int) ([]bus.InboundMessage, error)
 }

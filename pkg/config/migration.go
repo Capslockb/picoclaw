@@ -14,11 +14,32 @@ import (
 // If the model already contains a "/" (indicating it has a protocol prefix), it is returned as-is.
 // Otherwise, the protocol prefix is added.
 func buildModelWithProtocol(protocol, model string) string {
-	if strings.Contains(model, "/") {
-		// Model already has a protocol prefix, return as-is
+	if model == "" {
+		return ""
+	}
+
+	// If the model already starts with the protocol prefix, return as-is
+	prefix := protocol + "/"
+	if strings.HasPrefix(model, prefix) {
 		return model
 	}
-	return protocol + "/" + model
+
+	// Handle known nested prefixes for specific providers
+	// Example: provider 'nvidia' and model 'meta/llama-3.1' -> 'nvidia/meta/llama-3.1'
+	if protocol == "nvidia" && (strings.HasPrefix(model, "meta/") || strings.HasPrefix(model, "nvidia/")) {
+		if strings.HasPrefix(model, "nvidia/") {
+			return model // Already correctly prefixed
+		}
+		return prefix + model
+	}
+
+	// If the model already has some other protocol prefix (contains "/"), 
+	// we assume it's intentional and return it as-is.
+	if strings.Contains(model, "/") {
+		return model
+	}
+
+	return prefix + model
 }
 
 // providerMigrationConfig defines how to migrate a provider from old config to new format.

@@ -29,12 +29,27 @@ func DefaultConfig() *Config {
 				Workspace:                 workspacePath,
 				RestrictToWorkspace:       true,
 				Provider:                  "",
-				Model:                     "",
+				ModelName:                 "openrouter-free",
+				Model:                     "openrouter/free",
 				MaxTokens:                 32768,
 				Temperature:               nil, // nil means use provider default
-				MaxToolIterations:         50,
+				MaxToolIterations:         10,
 				SummarizeMessageThreshold: 20,
-				SummarizeTokenPercent:     75,
+			},
+			List: []AgentConfig{
+				{
+					ID:   "video_processor",
+					Name: "Video Processing Agent",
+					Model: &AgentModelConfig{
+						Primary: "gemini-flash",
+					},
+					Subagents: &SubagentsConfig{
+						Model: &AgentModelConfig{
+							Primary: "gemini-flash",
+						},
+					},
+					Skills: []string{"video_editor"},
+				},
 			},
 		},
 		Bindings: []AgentBinding{},
@@ -249,6 +264,12 @@ func DefaultConfig() *Config {
 
 			// OpenRouter (100+ models) - https://openrouter.ai/keys
 			{
+				ModelName: "openrouter-free",
+				Model:     "openrouter/free",
+				APIBase:   "https://openrouter.ai/api/v1",
+				APIKey:    "",
+			},
+			{
 				ModelName: "openrouter-auto",
 				Model:     "openrouter/auto",
 				APIBase:   "https://openrouter.ai/api/v1",
@@ -443,6 +464,13 @@ func DefaultConfig() *Config {
 				ToolConfig: ToolConfig{
 					Enabled: false,
 				},
+				Discovery: ToolDiscoveryConfig{
+					Enabled:          false,
+					TTL:              5,
+					MaxSearchResults: 5,
+					UseBM25:          true,
+					UseRegex:         false,
+				},
 				Servers: map[string]MCPServerConfig{},
 			},
 			AppendFile: ToolConfig{
@@ -460,14 +488,27 @@ func DefaultConfig() *Config {
 			InstallSkill: ToolConfig{
 				Enabled: true,
 			},
+			Google: ToolConfig{
+				Enabled: true,
+			},
 			ListDir: ToolConfig{
 				Enabled: true,
 			},
 			Message: ToolConfig{
 				Enabled: true,
 			},
-			ReadFile: ToolConfig{
+			PDF: ToolConfig{
 				Enabled: true,
+			},
+			Browser: ToolConfig{
+				Enabled: false, // Requires Chrome/Chromium installed
+			},
+			Image: ToolConfig{
+				Enabled: true,
+			},
+			ReadFile: ReadFileToolConfig{
+				Enabled:         true,
+				MaxReadFileSize: 64 * 1024, // 64KB
 			},
 			Spawn: ToolConfig{
 				Enabled: true,
@@ -481,8 +522,26 @@ func DefaultConfig() *Config {
 			WebFetch: ToolConfig{
 				Enabled: true,
 			},
+			VPS: VPSConfig{
+				ToolConfig: ToolConfig{Enabled: true},
+				Host:       "187.77.75.173",
+				User:       "root",
+			},
 			WriteFile: ToolConfig{
 				Enabled: true,
+			},
+			Proactive: ProactiveConfig{
+				Enabled:                true,
+				SyncIntervalMinutes:    60,
+				ProcessIntervalMinutes: 120,
+			},
+			ElevenLabs: ElevenLabsConfig{
+				Enabled: false,
+			},
+			Interaction: InteractionConfig{
+				WritingStyle:     "Casual and helpful",
+				AutoReplyEnabled: false,
+				ApprovalRequired: true,
 			},
 		},
 		Heartbeat: HeartbeatConfig{

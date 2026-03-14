@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,8 +16,10 @@ type Session struct {
 	Key      string              `json:"key"`
 	Messages []providers.Message `json:"messages"`
 	Summary  string              `json:"summary,omitempty"`
+	Metadata map[string]any      `json:"metadata,omitempty"`
 	Created  time.Time           `json:"created"`
 	Updated  time.Time           `json:"updated"`
+	Checksum uint32              `json:"checksum,omitempty"`
 }
 
 type SessionManager struct {
@@ -145,6 +148,41 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
+func (sm *SessionManager) SetMetadata(key string, metaKey string, value any) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Metadata: make(map[string]any),
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]any)
+	}
+	session.Metadata[metaKey] = value
+	session.Updated = time.Now()
+}
+
+func (sm *SessionManager) GetMetadata(key string, metaKey string) (any, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || session.Metadata == nil {
+		return nil, false
+	}
+
+	val, ok := session.Metadata[metaKey]
+	return val, ok
+}
+
 // sanitizeFilename converts a session key into a cross-platform safe filename.
 // Session keys use "channel:chatID" (e.g. "telegram:123456") but ':' is the
 // volume separator on Windows, so filepath.Base would misinterpret the key.
@@ -191,12 +229,23 @@ func (sm *SessionManager) Save(key string) error {
 	}
 	sm.mu.RUnlock()
 
+	// Calculate checksum of JSON without checksum field
+	snapshot.Checksum = 0
 	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+	snapshot.Checksum = crc32.ChecksumIEEE(data)
+
+	// Re-marshal with checksum
+	data, err = json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
 
 	sessionPath := filepath.Join(sm.storage, filename+".json")
+	bakPath := sessionPath + ".bak"
+
 	tmpFile, err := os.CreateTemp(sm.storage, "session-*.tmp")
 	if err != nil {
 		return err
@@ -226,7 +275,13 @@ func (sm *SessionManager) Save(key string) error {
 		return err
 	}
 
+	// If primary exists, rename it to .bak before applying the new version.
+	if _, err := os.Stat(sessionPath); err == nil {
+		_ = os.Rename(sessionPath, bakPath)
+	}
+
 	if err := os.Rename(tmpPath, sessionPath); err != nil {
+		_ = os.Rename(bakPath, sessionPath)
 		return err
 	}
 	cleanup = false
@@ -249,6 +304,8 @@ func (sm *SessionManager) loadSessions() error {
 		}
 
 		sessionPath := filepath.Join(sm.storage, file.Name())
+		bakPath := sessionPath + ".bak"
+
 		data, err := os.ReadFile(sessionPath)
 		if err != nil {
 			continue
@@ -256,6 +313,29 @@ func (sm *SessionManager) loadSessions() error {
 
 		var session Session
 		if err := json.Unmarshal(data, &session); err != nil {
+			// Try to recover from backup
+			if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil {
+				if err := json.Unmarshal(bakData, &session); err == nil {
+					if sm.verifyChecksum(&session) {
+						sm.sessions[session.Key] = &session
+						continue
+					}
+				}
+			}
+			continue
+		}
+
+		if !sm.verifyChecksum(&session) {
+			// Try backup if primary is corrupted
+			if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil {
+				var bakSession Session
+				if err := json.Unmarshal(bakData, &bakSession); err == nil {
+					if sm.verifyChecksum(&bakSession) {
+						sm.sessions[bakSession.Key] = &bakSession
+						continue
+					}
+				}
+			}
 			continue
 		}
 
@@ -279,4 +359,19 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 		session.Messages = msgs
 		session.Updated = time.Now()
 	}
+}
+
+func (sm *SessionManager) verifyChecksum(s *Session) bool {
+	if s.Checksum == 0 {
+		return true // Legacy session
+	}
+	saved := s.Checksum
+	s.Checksum = 0
+	defer func() { s.Checksum = saved }()
+
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return false
+	}
+	return crc32.ChecksumIEEE(data) == saved
 }
